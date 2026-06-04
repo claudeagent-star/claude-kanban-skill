@@ -118,6 +118,14 @@ body {
   gap: 0.5rem;
 }
 .column-body.drag-over { background: rgba(184, 94, 46, 0.06); }
+.drop-indicator {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  margin: -0.15rem 0;
+  box-shadow: 0 0 0 2px rgba(184, 94, 46, 0.18);
+  pointer-events: none;
+}
 
 .card {
   background: var(--bg-elev);
@@ -131,10 +139,25 @@ body {
   word-break: break-word;
   transition: transform .08s, box-shadow .08s;
   user-select: none;
+  /* Suppress native touch gestures (scroll, pinch) so pointer events
+     reach our drag handlers on mobile. Users scroll the column by
+     touching its padding or header rather than a card. */
+  touch-action: none;
+  -webkit-user-drag: none;
 }
 .card:hover { box-shadow: 0 2px 4px rgba(0,0,0,.08), 0 8px 18px rgba(0,0,0,.06); }
 .card:active { cursor: grabbing; }
-.card.dragging { opacity: 0.5; }
+.card.dragging { opacity: 0.4; }
+
+/* Ghost that follows the pointer during a drag. */
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  transform: rotate(1.5deg);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.10);
+  opacity: 0.92;
+}
 .card .title { font-weight: 600; }
 
 /* Colour palette: thick left border + faint tint of matching hue.

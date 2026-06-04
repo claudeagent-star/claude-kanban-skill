@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
 
@@ -60,7 +61,29 @@ func (b *Board) load() error {
 		return fmt.Errorf("parse state: %w", err)
 	}
 	b.cards = cards
+	// Legacy state files may have all-zero positions. Renumber each column
+	// 0..N-1 in load order so drag-and-drop has a stable basis.
+	b.renumberAllColumns()
 	return nil
+}
+
+// renumberAllColumns assigns positions 0..N-1 within each column,
+// preserving the relative order implied by current (column, position) sort.
+// Caller must hold b.mu (or hold no other writer, e.g. during load).
+func (b *Board) renumberAllColumns() {
+	byCol := map[string][]int{}
+	for i := range b.cards {
+		byCol[b.cards[i].Column] = append(byCol[b.cards[i].Column], i)
+	}
+	for _, idxs := range byCol {
+		ids := idxs
+		sort.SliceStable(ids, func(i, j int) bool {
+			return b.cards[ids[i]].Position < b.cards[ids[j]].Position
+		})
+		for n, i := range ids {
+			b.cards[i].Position = n
+		}
+	}
 }
 
 // save writes the current in-memory state to disk atomically.
@@ -92,15 +115,23 @@ func (b *Board) ListCards() []Card {
 	return out
 }
 
-// AddCard creates a card on the board and persists.
+// AddCard creates a card on the board and persists. The new card is appended
+// to the end of its column (Position = current count in that column).
 func (b *Board) AddCard(title, description, column, color string) (Card, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	pos := 0
+	for i := range b.cards {
+		if b.cards[i].Column == column {
+			pos++
+		}
+	}
 	c := Card{
 		ID:          newID(),
 		Title:       title,
 		Description: description,
 		Column:      column,
+		Position:    pos,
 		Color:       color,
 	}
 	b.cards = append(b.cards, c)
@@ -126,35 +157,113 @@ type CardUpdate struct {
 var ErrCardNotFound = errors.New("card not found")
 
 // UpdateCard applies a sparse update and persists. Unknown IDs return ErrCardNotFound.
+// When Column or Position is set, the card is moved to that (column, position) slot
+// and the affected columns are renumbered 0..N-1 so positions stay contiguous.
 func (b *Board) UpdateCard(id string, u CardUpdate) (Card, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	idx := -1
 	for i := range b.cards {
-		if b.cards[i].ID != id {
+		if b.cards[i].ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return Card{}, ErrCardNotFound
+	}
+	if u.Title != nil {
+		b.cards[idx].Title = *u.Title
+	}
+	if u.Description != nil {
+		b.cards[idx].Description = *u.Description
+	}
+	if u.Color != nil {
+		b.cards[idx].Color = *u.Color
+	}
+	if u.Column != nil || u.Position != nil {
+		targetColumn := b.cards[idx].Column
+		if u.Column != nil {
+			targetColumn = *u.Column
+		}
+		targetPosition := b.cards[idx].Position
+		if u.Position != nil {
+			targetPosition = *u.Position
+		}
+		b.moveTo(idx, targetColumn, targetPosition)
+	}
+	updated := b.cards[idx]
+	if err := b.save(); err != nil {
+		return Card{}, err
+	}
+	return updated, nil
+}
+
+// moveTo re-inserts the card at b.cards[idx] at (targetColumn, targetPosition)
+// in that column's ordering, then renumbers the affected columns 0..N-1.
+// targetPosition is clamped to [0, len(column)].
+// Caller must hold b.mu.
+func (b *Board) moveTo(idx int, targetColumn string, targetPosition int) {
+	moved := &b.cards[idx]
+	oldColumn := moved.Column
+	moved.Column = targetColumn
+
+	// Collect indices of cards in the affected columns, excluding the moved card.
+	var inOld, inNew []int
+	for i := range b.cards {
+		if i == idx {
 			continue
 		}
-		if u.Title != nil {
-			b.cards[i].Title = *u.Title
+		c := &b.cards[i]
+		if c.Column == oldColumn {
+			inOld = append(inOld, i)
 		}
-		if u.Description != nil {
-			b.cards[i].Description = *u.Description
+		if oldColumn != targetColumn && c.Column == targetColumn {
+			inNew = append(inNew, i)
 		}
-		if u.Column != nil {
-			b.cards[i].Column = *u.Column
-		}
-		if u.Position != nil {
-			b.cards[i].Position = *u.Position
-		}
-		if u.Color != nil {
-			b.cards[i].Color = *u.Color
-		}
-		updated := b.cards[i]
-		if err := b.save(); err != nil {
-			return Card{}, err
-		}
-		return updated, nil
 	}
-	return Card{}, ErrCardNotFound
+	sort.SliceStable(inOld, func(i, j int) bool {
+		return b.cards[inOld[i]].Position < b.cards[inOld[j]].Position
+	})
+
+	if oldColumn == targetColumn {
+		clamp := targetPosition
+		if clamp < 0 {
+			clamp = 0
+		}
+		if clamp > len(inOld) {
+			clamp = len(inOld)
+		}
+		for n := 0; n < clamp; n++ {
+			b.cards[inOld[n]].Position = n
+		}
+		moved.Position = clamp
+		for n := clamp; n < len(inOld); n++ {
+			b.cards[inOld[n]].Position = n + 1
+		}
+		return
+	}
+
+	sort.SliceStable(inNew, func(i, j int) bool {
+		return b.cards[inNew[i]].Position < b.cards[inNew[j]].Position
+	})
+	for n, i := range inOld {
+		b.cards[i].Position = n
+	}
+	clamp := targetPosition
+	if clamp < 0 {
+		clamp = 0
+	}
+	if clamp > len(inNew) {
+		clamp = len(inNew)
+	}
+	for n := 0; n < clamp; n++ {
+		b.cards[inNew[n]].Position = n
+	}
+	moved.Position = clamp
+	for n := clamp; n < len(inNew); n++ {
+		b.cards[inNew[n]].Position = n + 1
+	}
 }
 
 // DeleteCard removes a card by ID and persists. Unknown IDs return ErrCardNotFound.

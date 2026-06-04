@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -121,6 +122,151 @@ func TestDeleteCardUnknownIDReturnsError(t *testing.T) {
 	b := freshBoard(t)
 	if err := b.DeleteCard("nope"); err == nil {
 		t.Fatalf("expected error for unknown id")
+	}
+}
+
+func TestAddCardAssignsAppendingPositionPerColumn(t *testing.T) {
+	b := freshBoard(t)
+	a, _ := b.AddCard("a", "", "to-do", "")
+	bcard, _ := b.AddCard("b", "", "to-do", "")
+	c, _ := b.AddCard("c", "", "done", "")
+	d, _ := b.AddCard("d", "", "to-do", "")
+
+	if a.Position != 0 {
+		t.Errorf("a: want pos 0, got %d", a.Position)
+	}
+	if bcard.Position != 1 {
+		t.Errorf("b: want pos 1, got %d", bcard.Position)
+	}
+	if c.Position != 0 {
+		t.Errorf("c (different column): want pos 0, got %d", c.Position)
+	}
+	if d.Position != 2 {
+		t.Errorf("d: want pos 2, got %d", d.Position)
+	}
+}
+
+func TestUpdateCardMoveWithinColumnRenumbers(t *testing.T) {
+	b := freshBoard(t)
+	a, _ := b.AddCard("a", "", "to-do", "") // pos 0
+	bcard, _ := b.AddCard("b", "", "to-do", "") // pos 1
+	c, _ := b.AddCard("c", "", "to-do", "") // pos 2
+
+	col := "to-do"
+	pos := 0
+	if _, err := b.UpdateCard(c.ID, CardUpdate{Column: &col, Position: &pos}); err != nil {
+		t.Fatalf("UpdateCard: %v", err)
+	}
+
+	got := map[string]int{}
+	for _, card := range b.ListCards() {
+		got[card.ID] = card.Position
+	}
+	if got[c.ID] != 0 {
+		t.Errorf("c: want pos 0, got %d", got[c.ID])
+	}
+	if got[a.ID] != 1 {
+		t.Errorf("a: want pos 1, got %d", got[a.ID])
+	}
+	if got[bcard.ID] != 2 {
+		t.Errorf("b: want pos 2, got %d", got[bcard.ID])
+	}
+}
+
+func TestUpdateCardMoveAcrossColumnsRenumbersBoth(t *testing.T) {
+	b := freshBoard(t)
+	a, _ := b.AddCard("a", "", "to-do", "")     // to-do pos 0
+	bcard, _ := b.AddCard("b", "", "to-do", "") // to-do pos 1
+	c, _ := b.AddCard("c", "", "to-do", "")     // to-do pos 2
+	d, _ := b.AddCard("d", "", "done", "")      // done pos 0
+
+	// Move b from to-do (pos 1) to done at position 0.
+	col := "done"
+	pos := 0
+	if _, err := b.UpdateCard(bcard.ID, CardUpdate{Column: &col, Position: &pos}); err != nil {
+		t.Fatalf("UpdateCard: %v", err)
+	}
+
+	byID := map[string]Card{}
+	for _, card := range b.ListCards() {
+		byID[card.ID] = card
+	}
+	if byID[a.ID].Column != "to-do" || byID[a.ID].Position != 0 {
+		t.Errorf("a: want to-do pos 0, got %s pos %d", byID[a.ID].Column, byID[a.ID].Position)
+	}
+	if byID[c.ID].Column != "to-do" || byID[c.ID].Position != 1 {
+		t.Errorf("c: want to-do pos 1 (compacted), got %s pos %d", byID[c.ID].Column, byID[c.ID].Position)
+	}
+	if byID[bcard.ID].Column != "done" || byID[bcard.ID].Position != 0 {
+		t.Errorf("b: want done pos 0, got %s pos %d", byID[bcard.ID].Column, byID[bcard.ID].Position)
+	}
+	if byID[d.ID].Column != "done" || byID[d.ID].Position != 1 {
+		t.Errorf("d: want done pos 1 (shifted), got %s pos %d", byID[d.ID].Column, byID[d.ID].Position)
+	}
+}
+
+func TestUpdateCardClampsPositionPastEnd(t *testing.T) {
+	b := freshBoard(t)
+	a, _ := b.AddCard("a", "", "to-do", "")
+	bcard, _ := b.AddCard("b", "", "to-do", "")
+
+	// Position 99 is past the end; should clamp to end (after a, last slot for b).
+	col := "to-do"
+	pos := 99
+	if _, err := b.UpdateCard(a.ID, CardUpdate{Column: &col, Position: &pos}); err != nil {
+		t.Fatalf("UpdateCard: %v", err)
+	}
+	byID := map[string]int{}
+	for _, card := range b.ListCards() {
+		byID[card.ID] = card.Position
+	}
+	if byID[bcard.ID] != 0 {
+		t.Errorf("b: want pos 0, got %d", byID[bcard.ID])
+	}
+	if byID[a.ID] != 1 {
+		t.Errorf("a: want pos 1 (clamped end), got %d", byID[a.ID])
+	}
+}
+
+func TestUpdateCardTitleOnlyDoesNotReorder(t *testing.T) {
+	b := freshBoard(t)
+	a, _ := b.AddCard("a", "", "to-do", "") // pos 0
+	bcard, _ := b.AddCard("b", "", "to-do", "") // pos 1
+
+	newTitle := "renamed"
+	if _, err := b.UpdateCard(a.ID, CardUpdate{Title: &newTitle}); err != nil {
+		t.Fatalf("UpdateCard: %v", err)
+	}
+	byID := map[string]Card{}
+	for _, card := range b.ListCards() {
+		byID[card.ID] = card
+	}
+	if byID[a.ID].Position != 0 || byID[bcard.ID].Position != 1 {
+		t.Errorf("title edit shouldn't renumber: a=%d b=%d", byID[a.ID].Position, byID[bcard.ID].Position)
+	}
+}
+
+func TestLoadNormalisesLegacyZeroPositions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	// Simulate a pre-renumbering state file: three cards, all position 0.
+	legacy := `[
+	  {"id":"aaa","title":"a","description":"","column":"to-do","position":0},
+	  {"id":"bbb","title":"b","description":"","column":"to-do","position":0},
+	  {"id":"ccc","title":"c","description":"","column":"to-do","position":0}
+	]`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	b, err := NewBoard(path)
+	if err != nil {
+		t.Fatalf("NewBoard: %v", err)
+	}
+	got := map[string]int{}
+	for _, card := range b.ListCards() {
+		got[card.ID] = card.Position
+	}
+	if got["aaa"] != 0 || got["bbb"] != 1 || got["ccc"] != 2 {
+		t.Errorf("legacy renumber: got aaa=%d bbb=%d ccc=%d", got["aaa"], got["bbb"], got["ccc"])
 	}
 }
 
