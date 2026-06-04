@@ -16,6 +16,7 @@ const form      = document.getElementById('card-form');
 const titleEl   = document.getElementById('card-title');
 const descEl    = document.getElementById('card-description');
 const colEl     = document.getElementById('card-column');
+const colorEl   = document.getElementById('card-color');
 const delBtn    = document.getElementById('card-delete');
 const cancelBtn = document.getElementById('card-cancel');
 const addBtn    = document.getElementById('add-card');
@@ -111,6 +112,9 @@ function renderCard(card) {
   el.className = 'card';
   el.draggable = true;
   el.dataset.id = card.id;
+  if (card.color) {
+    el.dataset.color = card.color;
+  }
 
   const title = document.createElement('div');
   title.className = 'title';
@@ -144,12 +148,14 @@ function openModal(card) {
     titleEl.value = card.title;
     descEl.value = card.description || '';
     colEl.value = card.column || 'to-do';
+    colorEl.value = card.color || '';
     delBtn.hidden = false;
   } else {
     editingId = null;
     titleEl.value = '';
     descEl.value = '';
     colEl.value = 'to-do';
+    colorEl.value = '';
     delBtn.hidden = true;
   }
   modal.showModal();
@@ -164,6 +170,7 @@ form.addEventListener('submit', async e => {
     title: titleEl.value.trim(),
     description: descEl.value,
     column: colEl.value,
+    color: colorEl.value,
   };
   if (!payload.title) return;
   try {

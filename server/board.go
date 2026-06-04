@@ -18,6 +18,10 @@ type Card struct {
 	Description string `json:"description"`
 	Column      string `json:"column"`
 	Position    int    `json:"position"`
+	// Color is an optional palette tag rendered by the frontend as a
+	// left-border + tinted background. Empty string = no colour.
+	// Allowed values are validated by the API layer (see handlers.go).
+	Color string `json:"color,omitempty"`
 }
 
 // Board owns the in-memory state and the JSON state file.
@@ -89,7 +93,7 @@ func (b *Board) ListCards() []Card {
 }
 
 // AddCard creates a card on the board and persists.
-func (b *Board) AddCard(title, description, column string) (Card, error) {
+func (b *Board) AddCard(title, description, column, color string) (Card, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	c := Card{
@@ -97,6 +101,7 @@ func (b *Board) AddCard(title, description, column string) (Card, error) {
 		Title:       title,
 		Description: description,
 		Column:      column,
+		Color:       color,
 	}
 	b.cards = append(b.cards, c)
 	if err := b.save(); err != nil {
@@ -114,6 +119,7 @@ type CardUpdate struct {
 	Description *string `json:"description,omitempty"`
 	Column      *string `json:"column,omitempty"`
 	Position    *int    `json:"position,omitempty"`
+	Color       *string `json:"color,omitempty"`
 }
 
 // ErrCardNotFound is returned when a card ID doesn't exist on the board.
@@ -138,6 +144,9 @@ func (b *Board) UpdateCard(id string, u CardUpdate) (Card, error) {
 		}
 		if u.Position != nil {
 			b.cards[i].Position = *u.Position
+		}
+		if u.Color != nil {
+			b.cards[i].Color = *u.Color
 		}
 		updated := b.cards[i]
 		if err := b.save(); err != nil {
