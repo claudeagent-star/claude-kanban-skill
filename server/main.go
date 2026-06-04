@@ -43,11 +43,18 @@ func main() {
 	root.Handle("/api/", logRequests(logger, api))
 	root.Handle("/", staticHandler)
 
-	logger.Info("kanban starting", "listen", *listen, "state", *statePath, "cards", len(board.ListCards()))
+	authUser := os.Getenv("KANBAN_USER")
+	authPass := os.Getenv("KANBAN_PASS")
+	handler := requireBasicAuth(authUser, authPass, root)
+	authMode := "off"
+	if authUser != "" || authPass != "" {
+		authMode = "basic"
+	}
+	logger.Info("kanban starting", "listen", *listen, "state", *statePath, "cards", len(board.ListCards()), "auth", authMode)
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           root,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	if err := srv.ListenAndServe(); err != nil {

@@ -7,6 +7,11 @@ Wants=network-online.target
 Type=simple
 User=kanban
 Group=kanban
+# Optional env file for basic auth credentials. Format:
+#   KANBAN_USER=username
+#   KANBAN_PASS=password
+# If absent, auth is disabled.
+EnvironmentFile=-/etc/kanban/env
 ExecStart=/usr/local/bin/kanban --listen 127.0.0.1:8765 --state /var/lib/kanban/state.json
 Restart=on-failure
 RestartSec=2
