@@ -55,8 +55,8 @@ func TestPostCardMissingTitleReturns400(t *testing.T) {
 
 func TestGetCardsReturnsAll(t *testing.T) {
 	mux, b := newServer(t)
-	b.AddCard("a", "", "to-do")
-	b.AddCard("b", "", "done")
+	b.AddCard("a", "", "to-do", "")
+	b.AddCard("b", "", "done", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/cards", nil)
 	rec := httptest.NewRecorder()
@@ -75,7 +75,7 @@ func TestGetCardsReturnsAll(t *testing.T) {
 
 func TestPatchCardUpdates(t *testing.T) {
 	mux, b := newServer(t)
-	c, _ := b.AddCard("orig", "", "to-do")
+	c, _ := b.AddCard("orig", "", "to-do", "")
 
 	body := `{"column":"done"}`
 	req := httptest.NewRequest(http.MethodPatch, "/api/cards/"+c.ID, strings.NewReader(body))
@@ -106,7 +106,7 @@ func TestPatchUnknownIDReturns404(t *testing.T) {
 
 func TestDeleteCardReturns204(t *testing.T) {
 	mux, b := newServer(t)
-	c, _ := b.AddCard("doomed", "", "to-do")
+	c, _ := b.AddCard("doomed", "", "to-do", "")
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/cards/"+c.ID, nil)
 	rec := httptest.NewRecorder()

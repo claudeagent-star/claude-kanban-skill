@@ -51,6 +51,21 @@ type createRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Column      string `json:"column"`
+	Color       string `json:"color"`
+}
+
+// validColors is the allowlist for the Card.Color field. Empty string
+// means "no colour" and is always allowed. Keep this in sync with the
+// CSS palette in static/style.css.
+var validColors = map[string]struct{}{
+	"":       {},
+	"red":    {},
+	"orange": {},
+	"yellow": {},
+	"green":  {},
+	"blue":   {},
+	"purple": {},
+	"grey":   {},
 }
 
 func handleCreate(w http.ResponseWriter, r *http.Request, b *Board) {
@@ -66,7 +81,11 @@ func handleCreate(w http.ResponseWriter, r *http.Request, b *Board) {
 	if req.Column == "" {
 		req.Column = "to-do"
 	}
-	c, err := b.AddCard(req.Title, req.Description, req.Column)
+	if _, ok := validColors[req.Color]; !ok {
+		http.Error(w, "invalid color (allowed: red, orange, yellow, green, blue, purple, grey, or empty)", http.StatusBadRequest)
+		return
+	}
+	c, err := b.AddCard(req.Title, req.Description, req.Column, req.Color)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -79,6 +98,12 @@ func handleUpdate(w http.ResponseWriter, r *http.Request, b *Board, id string) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&u); err != nil {
 		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
+	}
+	if u.Color != nil {
+		if _, ok := validColors[*u.Color]; !ok {
+			http.Error(w, "invalid color (allowed: red, orange, yellow, green, blue, purple, grey, or empty)", http.StatusBadRequest)
+			return
+		}
 	}
 	c, err := b.UpdateCard(id, u)
 	if errors.Is(err, ErrCardNotFound) {
