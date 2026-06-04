@@ -1,0 +1,29 @@
+[Unit]
+Description=kanban board (claude-kanban-skill)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kanban
+Group=kanban
+ExecStart=/usr/local/bin/kanban --listen 127.0.0.1:8765 --state /var/lib/kanban/state.json
+Restart=on-failure
+RestartSec=2
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/kanban
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

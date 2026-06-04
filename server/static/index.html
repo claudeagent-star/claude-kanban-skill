@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kanban</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Kanban</h1>
+  <button id="add-card" class="btn primary">Add card</button>
+</header>
+
+<main class="board">
+  <!-- Columns rendered by JS -->
+</main>
+
+<!-- Card details / edit modal -->
+<dialog id="card-modal" class="modal">
+  <form id="card-form" method="dialog">
+    <label>
+      <span>Title</span>
+      <input id="card-title" type="text" required maxlength="200" />
+    </label>
+    <label>
+      <span>Description</span>
+      <textarea id="card-description" rows="6" maxlength="4000"></textarea>
+    </label>
+    <label>
+      <span>Column</span>
+      <select id="card-column">
+        <option value="to-do">To Do</option>
+        <option value="blocked">Blocked</option>
+        <option value="in-progress">In Progress</option>
+        <option value="in-review">In Review</option>
+        <option value="done">Done</option>
+      </select>
+    </label>
+    <footer class="modal-footer">
+      <button type="button" id="card-delete" class="btn danger" hidden>Delete</button>
+      <span class="spacer"></span>
+      <button type="button" id="card-cancel" class="btn">Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </footer>
+  </form>
+</dialog>
+
+<script src="script.js"></script>
+</body>
+</html>

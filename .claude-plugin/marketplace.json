@@ -1,0 +1,21 @@
+{
+  "name": "mdodkins-kanban",
+  "owner": {
+    "name": "mdodkins"
+  },
+  "metadata": {
+    "description": "Self-hosted kanban board with HTTP API + drag-and-drop frontend, persisted to a JSON file. Bundled with a Go server so Claude can run, query, and update a board for the user.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "kanban",
+      "description": "Self-hosted kanban board with HTTP API and drag-and-drop frontend",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/kanban"
+      ]
+    }
+  ]
+}
