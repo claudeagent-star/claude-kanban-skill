@@ -118,6 +118,14 @@ body {
   gap: 0.5rem;
 }
 .column-body.drag-over { background: rgba(184, 94, 46, 0.06); }
+.drop-indicator {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  margin: -0.15rem 0;
+  box-shadow: 0 0 0 2px rgba(184, 94, 46, 0.18);
+  pointer-events: none;
+}
 
 .card {
   background: var(--bg-elev);

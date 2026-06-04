@@ -1,6 +1,6 @@
 // Kanban frontend, vanilla JS, no deps. Fetches state from /api/cards,
-// renders 5 columns, supports drag-and-drop between columns, and a modal
-// for create / edit / delete.
+// renders 5 columns, supports drag-and-drop between AND within columns
+// (with an insertion indicator), and a modal for create / edit / delete.
 
 const COLUMNS = [
   { id: 'to-do',       label: 'To Do' },
@@ -53,6 +53,41 @@ async function apiDelete(id) {
   if (!res.ok) throw new Error('delete failed: ' + res.status);
 }
 
+// ===== Drag-and-drop helpers =====
+
+// Single shared indicator line that marks the drop slot.
+let dropIndicator = null;
+function getDropIndicator() {
+  if (!dropIndicator) {
+    dropIndicator = document.createElement('div');
+    dropIndicator.className = 'drop-indicator';
+  }
+  return dropIndicator;
+}
+function clearDropIndicator() {
+  if (dropIndicator && dropIndicator.parentNode) {
+    dropIndicator.parentNode.removeChild(dropIndicator);
+  }
+}
+
+// Compute the index, within a column body, where a drop at clientY would land.
+// Excludes the card being dragged so reordering within a column behaves as expected.
+function dropIndexAt(body, clientY) {
+  const cards = [...body.querySelectorAll('.card:not(.dragging)')];
+  for (let i = 0; i < cards.length; i++) {
+    const r = cards[i].getBoundingClientRect();
+    if (clientY < r.top + r.height / 2) return i;
+  }
+  return cards.length;
+}
+
+function placeDropIndicator(body, index) {
+  const cards = [...body.querySelectorAll('.card:not(.dragging)')];
+  const ind = getDropIndicator();
+  if (index >= cards.length) body.appendChild(ind);
+  else body.insertBefore(ind, cards[index]);
+}
+
 // ===== Rendering =====
 
 function render(cards) {
@@ -81,19 +116,29 @@ function renderColumn(col, cards) {
   `;
   const body = colEl.querySelector('.column-body');
 
-  // Drop target on the column body.
+  // Drop target on the column body. Computes insertion index from cursor Y,
+  // shows an indicator line at that slot, and on drop PATCHes column+position.
   body.addEventListener('dragover', e => {
     e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
     body.classList.add('drag-over');
+    placeDropIndicator(body, dropIndexAt(body, e.clientY));
   });
-  body.addEventListener('dragleave', () => body.classList.remove('drag-over'));
+  body.addEventListener('dragleave', e => {
+    // Only clear when leaving the body for somewhere outside its subtree.
+    if (e.relatedTarget && body.contains(e.relatedTarget)) return;
+    body.classList.remove('drag-over');
+    clearDropIndicator();
+  });
   body.addEventListener('drop', async e => {
     e.preventDefault();
     body.classList.remove('drag-over');
     const cardId = e.dataTransfer.getData('text/card-id');
+    const index = dropIndexAt(body, e.clientY);
+    clearDropIndicator();
     if (!cardId) return;
     try {
-      await apiUpdate(cardId, { column: col.id });
+      await apiUpdate(cardId, { column: col.id, position: index });
       reload();
     } catch (err) {
       console.error(err);
@@ -133,7 +178,10 @@ function renderCard(card) {
     e.dataTransfer.effectAllowed = 'move';
     el.classList.add('dragging');
   });
-  el.addEventListener('dragend', () => el.classList.remove('dragging'));
+  el.addEventListener('dragend', () => {
+    el.classList.remove('dragging');
+    clearDropIndicator();
+  });
 
   el.addEventListener('click', () => openModal(card));
 
