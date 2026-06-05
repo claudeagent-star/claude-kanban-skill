@@ -367,6 +367,31 @@ delBtn.addEventListener('click', async () => {
 
 addBtn.addEventListener('click', () => openModal(null));
 
+// ===== Theme toggle =====
+//
+// The initial theme is applied in index.html before first paint, reading
+// localStorage and falling back to prefers-color-scheme. Here we just wire
+// the button to flip it and update the aria-pressed state.
+
+const themeBtn = document.getElementById('theme-toggle');
+function syncThemeButton() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+  themeBtn.setAttribute(
+    'aria-label',
+    isDark ? 'Switch to light mode' : 'Switch to dark mode'
+  );
+  themeBtn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+themeBtn.addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark'
+    ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('kanban-theme', next); } catch (e) { /* ignore */ }
+  syncThemeButton();
+});
+syncThemeButton();
+
 // ===== Boot =====
 
 async function reload() {
