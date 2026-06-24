@@ -272,6 +272,7 @@ body {
   background: var(--bg-elev);
   color: var(--ink);
   box-shadow: var(--shadow-modal);
+  overflow: visible; /* allow absolutely-positioned children (suggestion dropdown) to overflow */
 }
 .modal::backdrop {
   background: var(--backdrop);

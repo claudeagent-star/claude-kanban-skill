@@ -514,13 +514,19 @@ function moveMentionActive(delta) {
 }
 
 async function onDescInput() {
-  // Defer one tick: mobile keyboards may not update selectionStart synchronously.
+  // Snapshot cursor position synchronously — selectionStart can reset to 0
+  // during async gaps (mobile keyboards, automation contexts).
+  const snapValue = descEl.value;
+  const snapSel   = descEl.selectionStart;
+  // Defer one tick so mobile keyboards can settle before we check.
   await new Promise(r => setTimeout(r, 0));
-  const hit = mentionQueryAt(descEl);
-  if (!hit) { hideMentions(); return; }
-  const names = hit.trigger === '@' ? await loadAgents() : await loadTags();
+  const before = snapValue.slice(0, snapSel);
+  const m = before.match(/[@#](\w*)$/);
+  if (!m) { hideMentions(); return; }
+  const trigger = m[0][0], query = m[1], atStart = snapSel - m[0].length;
+  const names = trigger === '@' ? await loadAgents() : await loadTags();
   if (!names.length) { hideMentions(); return; }
-  showMentions(descEl, names, hit.query, hit.atStart, hit.trigger);
+  showMentions(descEl, names, query, atStart, trigger);
 }
 
 function onDescKeydown(e) {
