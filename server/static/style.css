@@ -315,7 +315,18 @@ body {
 }
 .modal-footer .spacer { flex: 1; }
 
-/* @-mention agent suggestion dropdown */
+.card .card-id {
+  display: block;
+  margin-top: 0.4rem;
+  font-family: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', monospace;
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  opacity: 0.55;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+
+/* @-mention / #-tag suggestion dropdown */
 .mention-dropdown {
   position: fixed;
   z-index: 10000;
@@ -324,8 +335,8 @@ body {
   border-radius: 8px;
   box-shadow: var(--shadow-modal);
   overflow: hidden;
-  max-height: 220px;
   overflow-y: auto;
+  /* max-height set dynamically by showMentions based on available viewport space */
 }
 .mention-item {
   display: flex;

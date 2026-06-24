@@ -296,6 +296,11 @@ function renderCard(card) {
     el.appendChild(tagsRow);
   }
 
+  const idChip = document.createElement('span');
+  idChip.className = 'card-id';
+  idChip.textContent = card.id.slice(0, 8);
+  el.appendChild(idChip);
+
   el.addEventListener('pointerdown', e => {
     // Primary button only for mouse; touch and pen have no button concept
     // so e.button is 0 for them anyway.
@@ -474,8 +479,16 @@ function showMentions(textarea, names, query, atStart, trigger) {
     sigil.textContent = trigger;
     btn.appendChild(sigil);
     btn.appendChild(document.createTextNode(name));
+    // Desktop: mousedown fires before blur; preventDefault keeps textarea focused.
     btn.addEventListener('mousedown', e => {
-      e.preventDefault(); // keep textarea focused
+      e.preventDefault();
+      applyMention(textarea, atStart, trigger, name);
+      hideMentions();
+    });
+    // Mobile: touchend fires after blur (blur has a 300 ms grace period).
+    // preventDefault stops the subsequent synthetic mousedown/click.
+    btn.addEventListener('touchend', e => {
+      e.preventDefault();
       applyMention(textarea, atStart, trigger, name);
       hideMentions();
     });
@@ -483,9 +496,24 @@ function showMentions(textarea, names, query, atStart, trigger) {
   }
   suggestEl.firstChild.classList.add('active');
 
+  // Position below or above the textarea depending on available viewport space.
+  // Use visualViewport when available so the virtual keyboard is accounted for
+  // (on iOS, window.innerHeight doesn't shrink when the keyboard opens).
   const rect = textarea.getBoundingClientRect();
-  suggestEl.style.top  = (rect.bottom + 4) + 'px';
-  suggestEl.style.left = rect.left + 'px';
+  const vpH = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+  const spaceBelow = vpH - rect.bottom;
+
+  if (spaceBelow >= 120) {
+    suggestEl.style.top    = (rect.bottom + 4) + 'px';
+    suggestEl.style.bottom = 'auto';
+    suggestEl.style.maxHeight = Math.min(220, spaceBelow - 8) + 'px';
+  } else {
+    // Virtual keyboard is likely covering the space below — show above instead.
+    suggestEl.style.top    = 'auto';
+    suggestEl.style.bottom = (vpH - rect.top + 4) + 'px';
+    suggestEl.style.maxHeight = Math.min(220, rect.top - 8) + 'px';
+  }
+  suggestEl.style.left  = rect.left + 'px';
   suggestEl.style.width = rect.width + 'px';
   suggestEl.hidden = false;
 }
@@ -499,6 +527,8 @@ function moveMentionActive(delta) {
 }
 
 async function onDescInput() {
+  // Defer one tick: mobile keyboards may not update selectionStart synchronously.
+  await new Promise(r => setTimeout(r, 0));
   const hit = mentionQueryAt(descEl);
   if (!hit) { hideMentions(); return; }
   const names = hit.trigger === '@' ? await loadAgents() : await loadTags();
@@ -523,8 +553,8 @@ function onDescKeydown(e) {
 
 descEl.addEventListener('input',   onDescInput);
 descEl.addEventListener('keydown', onDescKeydown);
-// Small delay on blur lets the mousedown-on-suggestion fire first.
-descEl.addEventListener('blur', () => setTimeout(hideMentions, 150));
+// Grace period on blur: 300 ms lets touchend fire before we close the list.
+descEl.addEventListener('blur', () => setTimeout(hideMentions, 300));
 // Hide if the modal closes.
 modal.addEventListener('close', hideMentions);
 
