@@ -11,23 +11,29 @@ const COLUMNS = [
   { id: 'done',        label: 'Done' },
 ];
 
-const boardEl = document.querySelector('.board');
-const modal     = document.getElementById('card-modal');
-const form      = document.getElementById('card-form');
-const titleEl   = document.getElementById('card-title');
-const descEl    = document.getElementById('card-description');
-const colEl     = document.getElementById('card-column');
-const colorEl   = document.getElementById('card-color');
-const tagsEl    = document.getElementById('card-tags');
-const delBtn    = document.getElementById('card-delete');
-const cancelBtn = document.getElementById('card-cancel');
-const addBtn    = document.getElementById('add-card');
+const boardEl      = document.querySelector('.board');
+const modal        = document.getElementById('card-modal');
+const form         = document.getElementById('card-form');
+const titleEl      = document.getElementById('card-title');
+const descEl       = document.getElementById('card-description');
+const colEl        = document.getElementById('card-column');
+const colorEl      = document.getElementById('card-color');
+const tagsEl       = document.getElementById('card-tags');
+const delBtn       = document.getElementById('card-delete');
+const cancelBtn    = document.getElementById('card-cancel');
+const addBtn       = document.getElementById('add-card');
+const attachDropEl = document.getElementById('attach-drop');
+const attachInputEl= document.getElementById('attach-input');
+const attachListEl = document.getElementById('attach-list');
+const attachPickBtn= document.getElementById('attach-pick');
 
 function parseTags(raw) {
   return raw.split(',').map(t => t.trim()).filter(Boolean);
 }
 
-let editingId = null; // null while creating, card.id while editing
+let editingId      = null; // null while creating, card.id while editing
+let attachExisting = [];   // existing attachments loaded from the server for the current card
+let attachPending  = [];   // files queued for upload when Save is clicked
 
 // ===== API =====
 
@@ -301,6 +307,14 @@ function renderCard(card) {
   idChip.textContent = card.id.slice(0, 8);
   el.appendChild(idChip);
 
+  if (card.attachments && card.attachments.length > 0) {
+    const clip = document.createElement('span');
+    clip.className = 'card-attach-count';
+    const n = card.attachments.length;
+    clip.textContent = '📎 ' + n + (n === 1 ? ' file' : ' files');
+    el.appendChild(clip);
+  }
+
   el.addEventListener('pointerdown', e => {
     // Primary button only for mouse; touch and pen have no button concept
     // so e.button is 0 for them anyway.
@@ -330,6 +344,8 @@ function renderCard(card) {
 // ===== Modal =====
 
 function openModal(card) {
+  attachPending  = [];
+  attachExisting = card ? (card.attachments || []) : [];
   if (card) {
     editingId = card.id;
     titleEl.value = card.title;
@@ -347,6 +363,7 @@ function openModal(card) {
     tagsEl.value = '';
     delBtn.hidden = true;
   }
+  renderAttachList();
   modal.showModal();
   setTimeout(() => titleEl.focus(), 0);
 }
@@ -364,11 +381,23 @@ form.addEventListener('submit', async e => {
   };
   if (!payload.title) return;
   try {
+    let cardId = editingId;
     if (editingId) {
       await apiUpdate(editingId, payload);
     } else {
-      await apiCreate(payload);
+      const created = await apiCreate(payload);
+      cardId = created.id;
     }
+    // Upload any pending files
+    for (const p of attachPending) {
+      const fd = new FormData();
+      fd.append('file', p.file);
+      const res = await fetch('api/cards/' + encodeURIComponent(cardId) + '/attachments', {
+        method: 'POST', body: fd,
+      });
+      if (!res.ok) console.error('attachment upload failed for', p.file.name, res.status);
+    }
+    attachPending = [];
     modal.close();
     reload();
   } catch (err) {
@@ -550,6 +579,100 @@ descEl.addEventListener('keydown', onDescKeydown);
 descEl.addEventListener('blur', () => setTimeout(hideMentions, 300));
 // Hide if the modal closes.
 modal.addEventListener('close', hideMentions);
+
+// ===== Attachments =====
+
+function fmtSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderAttachList() {
+  attachListEl.innerHTML = '';
+  for (const a of attachExisting) {
+    const li = document.createElement('li');
+    li.className = 'attach-item';
+    const link = document.createElement('a');
+    link.href = 'api/cards/' + encodeURIComponent(editingId) + '/attachments/' + encodeURIComponent(a.id);
+    link.download = a.filename;
+    link.textContent = a.filename;
+    link.className = 'attach-name';
+    const size = document.createElement('span');
+    size.className = 'attach-size';
+    size.textContent = fmtSize(a.size);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'attach-del-btn';
+    btn.title = 'Remove attachment';
+    btn.textContent = '×';
+    btn.addEventListener('click', async () => {
+      try {
+        const res = await fetch('api/cards/' + encodeURIComponent(editingId) + '/attachments/' + encodeURIComponent(a.id), { method: 'DELETE' });
+        if (!res.ok) throw new Error(res.status);
+        attachExisting = attachExisting.filter(x => x.id !== a.id);
+        li.remove();
+      } catch (err) {
+        alert('Could not delete attachment: ' + err.message);
+      }
+    });
+    li.append(link, size, btn);
+    attachListEl.appendChild(li);
+  }
+  for (const p of attachPending) {
+    const li = document.createElement('li');
+    li.className = 'attach-item attach-pending';
+    const name = document.createElement('span');
+    name.className = 'attach-name';
+    name.textContent = p.file.name;
+    const size = document.createElement('span');
+    size.className = 'attach-size';
+    size.textContent = fmtSize(p.file.size);
+    const badge = document.createElement('span');
+    badge.className = 'attach-pending-badge';
+    badge.textContent = 'pending';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'attach-del-btn';
+    btn.title = 'Remove';
+    btn.textContent = '×';
+    btn.addEventListener('click', () => {
+      attachPending = attachPending.filter(x => x !== p);
+      li.remove();
+    });
+    li.append(name, size, badge, btn);
+    attachListEl.appendChild(li);
+  }
+}
+
+const MAX_ATTACH_BYTES = 10 * 1024 * 1024;
+
+function addAttachFiles(fileList) {
+  for (const f of fileList) {
+    if (f.size > MAX_ATTACH_BYTES) {
+      alert(f.name + ' is too large (max 10 MB).');
+      continue;
+    }
+    attachPending.push({ file: f });
+  }
+  renderAttachList();
+}
+
+attachPickBtn.addEventListener('click', () => attachInputEl.click());
+attachInputEl.addEventListener('change', () => {
+  addAttachFiles(attachInputEl.files);
+  attachInputEl.value = '';
+});
+attachDropEl.addEventListener('dragover', e => {
+  e.preventDefault();
+  attachDropEl.classList.add('drag-active');
+});
+attachDropEl.addEventListener('dragleave', () => attachDropEl.classList.remove('drag-active'));
+attachDropEl.addEventListener('drop', e => {
+  e.preventDefault();
+  attachDropEl.classList.remove('drag-active');
+  addAttachFiles(e.dataTransfer.files);
+});
 
 // ===== Boot =====
 

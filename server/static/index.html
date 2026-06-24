@@ -89,6 +89,14 @@
       <span>Tags</span>
       <input id="card-tags" type="text" placeholder="comma-separated, e.g. urgent, backend" maxlength="500" />
     </label>
+    <div class="attach-group">
+      <span class="attach-group-label">Attachments</span>
+      <div id="attach-drop" class="attach-drop">
+        Drop files here or <button type="button" id="attach-pick" class="btn-link">browse</button>
+        <input type="file" id="attach-input" multiple hidden />
+      </div>
+      <ul id="attach-list" class="attach-list"></ul>
+    </div>
     <footer class="modal-footer">
       <button type="button" id="card-delete" class="btn danger" hidden>Delete</button>
       <span class="spacer"></span>
