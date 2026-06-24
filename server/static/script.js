@@ -412,6 +412,115 @@ themeBtn.addEventListener('click', () => {
 });
 syncThemeButton();
 
+// ===== @-mention agent suggestions =====
+//
+// When the user types @ in the description field, we fetch /api/agents and
+// show a filtered dropdown. Arrow keys navigate; Enter selects; Escape closes.
+
+const suggestEl = document.getElementById('mention-suggestions');
+let agentsCache = null;
+let mentionState = null; // { textarea, atStart } while the dropdown is open
+
+async function loadAgents() {
+  if (agentsCache !== null) return agentsCache;
+  try {
+    const res = await fetch('api/agents');
+    agentsCache = res.ok ? await res.json() : [];
+  } catch { agentsCache = []; }
+  return agentsCache;
+}
+
+// Returns { query, atStart } if cursor is inside an @-word, else null.
+function mentionQueryAt(el) {
+  const before = el.value.slice(0, el.selectionStart);
+  const m = before.match(/@(\w*)$/);
+  return m ? { query: m[1], atStart: el.selectionStart - m[0].length } : null;
+}
+
+function applyMention(textarea, atStart, name) {
+  const before = textarea.value.slice(0, atStart);
+  const after = textarea.value.slice(textarea.selectionStart);
+  textarea.value = before + '@' + name + after;
+  const pos = atStart + 1 + name.length;
+  textarea.selectionStart = textarea.selectionEnd = pos;
+}
+
+function hideMentions() {
+  suggestEl.hidden = true;
+  suggestEl.innerHTML = '';
+  mentionState = null;
+}
+
+function showMentions(textarea, agents, query, atStart) {
+  const filtered = agents.filter(a => a.toLowerCase().startsWith(query.toLowerCase()));
+  if (!filtered.length) { hideMentions(); return; }
+
+  mentionState = { textarea, atStart };
+  suggestEl.innerHTML = '';
+  for (const name of filtered) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mention-item';
+    btn.dataset.name = name;
+    const at = document.createElement('span');
+    at.className = 'mention-at';
+    at.textContent = '@';
+    btn.appendChild(at);
+    btn.appendChild(document.createTextNode(name));
+    btn.addEventListener('mousedown', e => {
+      e.preventDefault(); // keep textarea focused
+      applyMention(textarea, atStart, name);
+      hideMentions();
+    });
+    suggestEl.appendChild(btn);
+  }
+  suggestEl.firstChild.classList.add('active');
+
+  const rect = textarea.getBoundingClientRect();
+  suggestEl.style.top  = (rect.bottom + 4) + 'px';
+  suggestEl.style.left = rect.left + 'px';
+  suggestEl.style.width = rect.width + 'px';
+  suggestEl.hidden = false;
+}
+
+function moveMentionActive(delta) {
+  const items = [...suggestEl.querySelectorAll('.mention-item')];
+  if (!items.length) return;
+  const cur = items.findIndex(el => el.classList.contains('active'));
+  items[cur]?.classList.remove('active');
+  items[Math.max(0, Math.min(items.length - 1, cur + delta))].classList.add('active');
+}
+
+async function onDescInput() {
+  const hit = mentionQueryAt(descEl);
+  if (!hit) { hideMentions(); return; }
+  const agents = await loadAgents();
+  if (!agents.length) return;
+  showMentions(descEl, agents, hit.query, hit.atStart);
+}
+
+function onDescKeydown(e) {
+  if (suggestEl.hidden) return;
+  if (e.key === 'Escape') { hideMentions(); e.stopPropagation(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); moveMentionActive(1); return; }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); moveMentionActive(-1); return; }
+  if (e.key === 'Enter' && mentionState) {
+    const active = suggestEl.querySelector('.mention-item.active');
+    if (active) {
+      e.preventDefault();
+      applyMention(mentionState.textarea, mentionState.atStart, active.dataset.name);
+      hideMentions();
+    }
+  }
+}
+
+descEl.addEventListener('input',   onDescInput);
+descEl.addEventListener('keydown', onDescKeydown);
+// Small delay on blur lets the mousedown-on-suggestion fire first.
+descEl.addEventListener('blur', () => setTimeout(hideMentions, 150));
+// Hide if the modal closes.
+modal.addEventListener('close', hideMentions);
+
 // ===== Boot =====
 
 async function reload() {

@@ -10,13 +10,26 @@ import (
 // NewMux wires the kanban routes to a Board.
 // Routes:
 //
+//	GET    /api/agents        list agent names (for @-mention suggestions)
 //	GET    /api/cards         list all cards
 //	POST   /api/cards         create
 //	PATCH  /api/cards/{id}    sparse update
 //	DELETE /api/cards/{id}    remove
 //	GET    /                  static frontend (served by caller separately)
-func NewMux(b *Board) http.Handler {
+func NewMux(b *Board, agents []string) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/agents", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		list := agents
+		if list == nil {
+			list = []string{}
+		}
+		writeJSON(w, http.StatusOK, list)
+	})
 	mux.HandleFunc("/api/cards", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
