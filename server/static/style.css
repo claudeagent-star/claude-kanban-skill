@@ -326,17 +326,27 @@ body {
   user-select: all;
 }
 
-/* @-mention / #-tag suggestion dropdown */
+/* @-mention / #-tag suggestion dropdown.
+   Lives inside .desc-wrap (position: relative) so it's part of the dialog's
+   top-layer subtree and always renders above the backdrop. */
+.desc-wrap { position: relative; }
 .mention-dropdown {
-  position: fixed;
-  z-index: 10000;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 2px);   /* below textarea by default */
+  z-index: 100;
   background: var(--bg-elev);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow-modal);
   overflow: hidden;
   overflow-y: auto;
-  /* max-height set dynamically by showMentions based on available viewport space */
+  max-height: 220px;
+}
+.mention-dropdown.above {
+  top: auto;
+  bottom: calc(100% + 2px); /* above textarea when keyboard covers below */
 }
 .mention-item {
   display: flex;

@@ -496,25 +496,12 @@ function showMentions(textarea, names, query, atStart, trigger) {
   }
   suggestEl.firstChild.classList.add('active');
 
-  // Position below or above the textarea depending on available viewport space.
-  // Use visualViewport when available so the virtual keyboard is accounted for
-  // (on iOS, window.innerHeight doesn't shrink when the keyboard opens).
+  // Flip above the textarea when the virtual keyboard is covering the space below.
+  // visualViewport.height shrinks when the keyboard opens (unlike window.innerHeight
+  // on iOS), so this reliably detects the keyboard on mobile.
   const rect = textarea.getBoundingClientRect();
-  const vpH = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
-  const spaceBelow = vpH - rect.bottom;
-
-  if (spaceBelow >= 120) {
-    suggestEl.style.top    = (rect.bottom + 4) + 'px';
-    suggestEl.style.bottom = 'auto';
-    suggestEl.style.maxHeight = Math.min(220, spaceBelow - 8) + 'px';
-  } else {
-    // Virtual keyboard is likely covering the space below — show above instead.
-    suggestEl.style.top    = 'auto';
-    suggestEl.style.bottom = (vpH - rect.top + 4) + 'px';
-    suggestEl.style.maxHeight = Math.min(220, rect.top - 8) + 'px';
-  }
-  suggestEl.style.left  = rect.left + 'px';
-  suggestEl.style.width = rect.width + 'px';
+  const vpH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  suggestEl.classList.toggle('above', vpH - rect.bottom < 120);
   suggestEl.hidden = false;
 }
 

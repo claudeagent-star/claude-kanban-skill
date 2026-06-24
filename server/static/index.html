@@ -57,7 +57,10 @@
     </label>
     <label>
       <span>Description</span>
-      <textarea id="card-description" rows="6" maxlength="4000"></textarea>
+      <div class="desc-wrap">
+        <textarea id="card-description" rows="6" maxlength="4000"></textarea>
+        <div id="mention-suggestions" class="mention-dropdown" hidden></div>
+      </div>
     </label>
     <label>
       <span>Column</span>
@@ -95,7 +98,6 @@
   </form>
 </dialog>
 
-<div id="mention-suggestions" class="mention-dropdown" hidden></div>
 <script src="script.js"></script>
 </body>
 </html>
