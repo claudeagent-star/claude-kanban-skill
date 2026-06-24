@@ -18,9 +18,14 @@ const titleEl   = document.getElementById('card-title');
 const descEl    = document.getElementById('card-description');
 const colEl     = document.getElementById('card-column');
 const colorEl   = document.getElementById('card-color');
+const tagsEl    = document.getElementById('card-tags');
 const delBtn    = document.getElementById('card-delete');
 const cancelBtn = document.getElementById('card-cancel');
 const addBtn    = document.getElementById('add-card');
+
+function parseTags(raw) {
+  return raw.split(',').map(t => t.trim()).filter(Boolean);
+}
 
 let editingId = null; // null while creating, card.id while editing
 
@@ -279,6 +284,18 @@ function renderCard(card) {
     el.appendChild(desc);
   }
 
+  if (card.tags && card.tags.length > 0) {
+    const tagsRow = document.createElement('div');
+    tagsRow.className = 'tags';
+    for (const tag of card.tags) {
+      const pill = document.createElement('span');
+      pill.className = 'tag';
+      pill.textContent = tag;
+      tagsRow.appendChild(pill);
+    }
+    el.appendChild(tagsRow);
+  }
+
   el.addEventListener('pointerdown', e => {
     // Primary button only for mouse; touch and pen have no button concept
     // so e.button is 0 for them anyway.
@@ -314,6 +331,7 @@ function openModal(card) {
     descEl.value = card.description || '';
     colEl.value = card.column || 'to-do';
     colorEl.value = card.color || '';
+    tagsEl.value = (card.tags || []).join(', ');
     delBtn.hidden = false;
   } else {
     editingId = null;
@@ -321,6 +339,7 @@ function openModal(card) {
     descEl.value = '';
     colEl.value = 'to-do';
     colorEl.value = '';
+    tagsEl.value = '';
     delBtn.hidden = true;
   }
   modal.showModal();
@@ -336,6 +355,7 @@ form.addEventListener('submit', async e => {
     description: descEl.value,
     column: colEl.value,
     color: colorEl.value,
+    tags: parseTags(tagsEl.value),
   };
   if (!payload.title) return;
   try {
