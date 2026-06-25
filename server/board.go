@@ -14,15 +14,25 @@ import (
 
 // Card is one item on the kanban board.
 type Card struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Column      string `json:"column"`
-	Position    int    `json:"position"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Column      string   `json:"column"`
+	Position    int      `json:"position"`
 	// Color is an optional palette tag rendered by the frontend as a
 	// left-border + tinted background. Empty string = no colour.
 	// Allowed values are validated by the API layer (see handlers.go).
-	Color string `json:"color,omitempty"`
+	Color       string       `json:"color,omitempty"`
+	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// Attachment is metadata for a file attached to a card.
+// The file itself lives at <attachDir>/<cardID>/<ID> on disk.
+type Attachment struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	MimeType string `json:"mime_type"`
+	Size     int64  `json:"size"`
 }
 
 // Board owns the in-memory state and the JSON state file.
@@ -156,6 +166,9 @@ type CardUpdate struct {
 // ErrCardNotFound is returned when a card ID doesn't exist on the board.
 var ErrCardNotFound = errors.New("card not found")
 
+// ErrAttachmentNotFound is returned when an attachment ID doesn't exist on a card.
+var ErrAttachmentNotFound = errors.New("attachment not found")
+
 // UpdateCard applies a sparse update and persists. Unknown IDs return ErrCardNotFound.
 // When Column or Position is set, the card is moved to that (column, position) slot
 // and the affected columns are renumbered 0..N-1 so positions stay contiguous.
@@ -278,6 +291,106 @@ func (b *Board) DeleteCard(id string) error {
 		return b.save()
 	}
 	return ErrCardNotFound
+}
+
+// AddAttachment writes data to disk and appends attachment metadata to the card.
+func (b *Board) AddAttachment(cardID, attachDir, filename, mimeType string, data []byte) (Attachment, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	idx := -1
+	for i := range b.cards {
+		if b.cards[i].ID == cardID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return Attachment{}, ErrCardNotFound
+	}
+	a := Attachment{
+		ID:       newID(),
+		Filename: sanitizeFilename(filename),
+		MimeType: mimeType,
+		Size:     int64(len(data)),
+	}
+	dir := filepath.Join(attachDir, cardID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Attachment{}, fmt.Errorf("mkdir attachments: %w", err)
+	}
+	filePath := filepath.Join(dir, a.ID)
+	if err := os.WriteFile(filePath, data, 0o644); err != nil {
+		return Attachment{}, fmt.Errorf("write attachment: %w", err)
+	}
+	b.cards[idx].Attachments = append(b.cards[idx].Attachments, a)
+	if err := b.save(); err != nil {
+		b.cards[idx].Attachments = b.cards[idx].Attachments[:len(b.cards[idx].Attachments)-1]
+		_ = os.Remove(filePath)
+		return Attachment{}, err
+	}
+	return a, nil
+}
+
+// GetAttachmentInfo returns the Attachment metadata for (cardID, attachmentID).
+func (b *Board) GetAttachmentInfo(cardID, attachmentID string) (Attachment, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.cards {
+		if b.cards[i].ID != cardID {
+			continue
+		}
+		for _, a := range b.cards[i].Attachments {
+			if a.ID == attachmentID {
+				return a, nil
+			}
+		}
+		return Attachment{}, ErrAttachmentNotFound
+	}
+	return Attachment{}, ErrCardNotFound
+}
+
+// DeleteAttachment removes attachment metadata from the card and deletes the file.
+func (b *Board) DeleteAttachment(cardID, attachmentID, attachDir string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.cards {
+		if b.cards[i].ID != cardID {
+			continue
+		}
+		atts := b.cards[i].Attachments
+		for j, a := range atts {
+			if a.ID != attachmentID {
+				continue
+			}
+			b.cards[i].Attachments = append(atts[:j:j], atts[j+1:]...)
+			if err := b.save(); err != nil {
+				b.cards[i].Attachments = atts // restore original slice
+				return err
+			}
+			_ = os.Remove(filepath.Join(attachDir, cardID, attachmentID))
+			return nil
+		}
+		return ErrAttachmentNotFound
+	}
+	return ErrCardNotFound
+}
+
+// sanitizeFilename strips path components and control characters, truncates to 255 bytes.
+func sanitizeFilename(name string) string {
+	name = filepath.Base(name)
+	runes := []rune(name)
+	for i, r := range runes {
+		if r == '/' || r == '\\' || r < 32 {
+			runes[i] = '_'
+		}
+	}
+	s := string(runes)
+	if s == "" || s == "." || s == ".." {
+		return "file"
+	}
+	if len(s) > 255 {
+		s = s[:255]
+	}
+	return s
 }
 
 // newID returns an unguessable 16-hex-char ID.
