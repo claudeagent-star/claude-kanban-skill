@@ -23,7 +23,14 @@ type Card struct {
 	// left-border + tinted background. Empty string = no colour.
 	// Allowed values are validated by the API layer (see handlers.go).
 	Color       string       `json:"color,omitempty"`
+	ProjectID   string       `json:"projectId,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+}
+
+// Project groups cards under a named label.
+type Project struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // Attachment is metadata for a file attached to a card.
@@ -40,8 +47,15 @@ type Attachment struct {
 type Board struct {
 	path string
 
-	mu    sync.Mutex
-	cards []Card
+	mu       sync.Mutex
+	cards    []Card
+	projects []Project
+}
+
+// boardState is the on-disk JSON envelope.
+type boardState struct {
+	Cards    []Card    `json:"cards"`
+	Projects []Project `json:"projects"`
 }
 
 // NewBoard loads (or creates) the board state at path.
@@ -54,7 +68,9 @@ func NewBoard(path string) (*Board, error) {
 	return b, nil
 }
 
-// load reads the state file into b.cards. Missing file = empty.
+// load reads the state file. Missing file = empty board.
+// Handles both the legacy array format ([]Card) and the current envelope
+// format ({cards:[...], projects:[...]}).
 func (b *Board) load() error {
 	data, err := os.ReadFile(b.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -66,11 +82,19 @@ func (b *Board) load() error {
 	if len(data) == 0 {
 		return nil
 	}
-	var cards []Card
-	if err := json.Unmarshal(data, &cards); err != nil {
-		return fmt.Errorf("parse state: %w", err)
+	// Try envelope format first.
+	var state boardState
+	if json.Unmarshal(data, &state) == nil && (state.Cards != nil || state.Projects != nil) {
+		b.cards = state.Cards
+		b.projects = state.Projects
+	} else {
+		// Fall back to legacy array-of-cards format.
+		var cards []Card
+		if err := json.Unmarshal(data, &cards); err != nil {
+			return fmt.Errorf("parse state: %w", err)
+		}
+		b.cards = cards
 	}
-	b.cards = cards
 	// Legacy state files may have all-zero positions. Renumber each column
 	// 0..N-1 in load order so drag-and-drop has a stable basis.
 	b.renumberAllColumns()
@@ -102,7 +126,15 @@ func (b *Board) save() error {
 	if err := os.MkdirAll(filepath.Dir(b.path), 0o755); err != nil {
 		return fmt.Errorf("mkdir state dir: %w", err)
 	}
-	data, err := json.MarshalIndent(b.cards, "", "  ")
+	cards := b.cards
+	if cards == nil {
+		cards = []Card{}
+	}
+	projects := b.projects
+	if projects == nil {
+		projects = []Project{}
+	}
+	data, err := json.MarshalIndent(boardState{Cards: cards, Projects: projects}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)
 	}
@@ -127,7 +159,7 @@ func (b *Board) ListCards() []Card {
 
 // AddCard creates a card on the board and persists. The new card is appended
 // to the end of its column (Position = current count in that column).
-func (b *Board) AddCard(title, description, column, color string) (Card, error) {
+func (b *Board) AddCard(title, description, column, color, projectID string) (Card, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	pos := 0
@@ -143,6 +175,7 @@ func (b *Board) AddCard(title, description, column, color string) (Card, error) 
 		Column:      column,
 		Position:    pos,
 		Color:       color,
+		ProjectID:   projectID,
 	}
 	b.cards = append(b.cards, c)
 	if err := b.save(); err != nil {
@@ -161,6 +194,7 @@ type CardUpdate struct {
 	Column      *string `json:"column,omitempty"`
 	Position    *int    `json:"position,omitempty"`
 	Color       *string `json:"color,omitempty"`
+	ProjectID   *string `json:"projectId,omitempty"`
 }
 
 // ErrCardNotFound is returned when a card ID doesn't exist on the board.
@@ -193,6 +227,9 @@ func (b *Board) UpdateCard(id string, u CardUpdate) (Card, error) {
 	}
 	if u.Color != nil {
 		b.cards[idx].Color = *u.Color
+	}
+	if u.ProjectID != nil {
+		b.cards[idx].ProjectID = *u.ProjectID
 	}
 	if u.Column != nil || u.Position != nil {
 		targetColumn := b.cards[idx].Column
@@ -391,6 +428,45 @@ func sanitizeFilename(name string) string {
 		s = s[:255]
 	}
 	return s
+}
+
+// ErrProjectNotFound is returned when a project ID doesn't exist.
+var ErrProjectNotFound = errors.New("project not found")
+
+// ListProjects returns a copy of all projects.
+func (b *Board) ListProjects() []Project {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]Project, len(b.projects))
+	copy(out, b.projects)
+	return out
+}
+
+// AddProject creates a project and persists.
+func (b *Board) AddProject(name string) (Project, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := Project{ID: newID(), Name: name}
+	b.projects = append(b.projects, p)
+	if err := b.save(); err != nil {
+		b.projects = b.projects[:len(b.projects)-1]
+		return Project{}, err
+	}
+	return p, nil
+}
+
+// DeleteProject removes a project by ID and persists.
+func (b *Board) DeleteProject(id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.projects {
+		if b.projects[i].ID != id {
+			continue
+		}
+		b.projects = append(b.projects[:i], b.projects[i+1:]...)
+		return b.save()
+	}
+	return ErrProjectNotFound
 }
 
 // newID returns an unguessable 16-hex-char ID.

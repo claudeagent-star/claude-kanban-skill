@@ -15,6 +15,10 @@ import (
 // Routes:
 //
 //	GET    /api/agents                          list agent names
+//	GET    /api/config                          board config (agents list)
+//	GET    /api/projects                        list all projects
+//	POST   /api/projects                        create project
+//	DELETE /api/projects/{id}                   remove project
 //	GET    /api/cards                           list all cards
 //	POST   /api/cards                           create
 //	PATCH  /api/cards/{id}                      sparse update
@@ -35,6 +39,62 @@ func NewMux(b *Board, agents []string, attachDir string) http.Handler {
 			list = []string{}
 		}
 		writeJSON(w, http.StatusOK, list)
+	})
+	mux.HandleFunc("/api/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		list := agents
+		if list == nil {
+			list = []string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"agents": list})
+	})
+	mux.HandleFunc("/api/projects", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, b.ListProjects())
+		case http.MethodPost:
+			var req struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			if req.Name == "" {
+				http.Error(w, "name is required", http.StatusBadRequest)
+				return
+			}
+			p, err := b.AddProject(req.Name)
+			if err != nil {
+				http.Error(w, "internal error", http.StatusInternalServerError)
+				return
+			}
+			writeJSON(w, http.StatusCreated, p)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/projects/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/projects/")
+		if id == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			w.Header().Set("Allow", "DELETE")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := b.DeleteProject(id); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("/api/cards", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -105,6 +165,7 @@ type createRequest struct {
 	Description string `json:"description"`
 	Column      string `json:"column"`
 	Color       string `json:"color"`
+	ProjectID   string `json:"projectId"`
 }
 
 // validColors is the allowlist for the Card.Color field. Empty string
@@ -138,7 +199,7 @@ func handleCreate(w http.ResponseWriter, r *http.Request, b *Board) {
 		http.Error(w, "invalid color (allowed: red, orange, yellow, green, blue, purple, grey, or empty)", http.StatusBadRequest)
 		return
 	}
-	c, err := b.AddCard(req.Title, req.Description, req.Column, req.Color)
+	c, err := b.AddCard(req.Title, req.Description, req.Column, req.Color, req.ProjectID)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
