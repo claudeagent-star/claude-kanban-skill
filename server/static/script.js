@@ -82,6 +82,15 @@ async function apiDeleteColumn(id) {
   const res = await fetch('api/columns/' + encodeURIComponent(id), { method: 'DELETE' });
   if (!res.ok) throw new Error('delete column failed: ' + res.status);
 }
+async function apiMoveColumn(id, position) {
+  const res = await fetch('api/columns/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ position }),
+  });
+  if (!res.ok) throw new Error('move column failed: ' + res.status);
+  return res.json();
+}
 
 // ===== Drag-and-drop helpers =====
 //
@@ -490,36 +499,48 @@ function startColumnRename(headerEl, col) {
   input.addEventListener('blur', () => finish(true));
 }
 
-// Open the rename/delete action sheet for a column.
+// Open the move/rename/delete action sheet for a column. Buttons use .onclick
+// (idempotent) so reopening the shared dialog never stacks handlers.
 function openColumnMenu(col, headerEl) {
   const menu = document.getElementById('column-menu');
   document.getElementById('column-menu-title').textContent = col.label;
-  const onRename = () => { close(); startColumnRename(headerEl, col); };
-  const onDelete = async () => {
-    close();
-    const n = headerEl.closest('.column').querySelectorAll('.card').length;
-    const msg = n > 0
-      ? 'Delete column "' + col.label + '" and its ' + n + ' card' + (n === 1 ? '' : 's') + '? This cannot be undone.'
-      : 'Delete column "' + col.label + '"?';
-    if (!await confirmBox(msg)) return;
-    try {
-      await apiDeleteColumn(col.id);
-      reload();
-    } catch (err) {
-      console.error(err);
-      alert('Delete failed: ' + err.message);
-    }
-  };
-  function close() {
-    document.getElementById('column-rename').removeEventListener('click', onRename);
-    document.getElementById('column-delete').removeEventListener('click', onDelete);
-    if (menu.open) menu.close();
-  }
-  document.getElementById('column-rename').addEventListener('click', onRename);
-  document.getElementById('column-delete').addEventListener('click', onDelete);
+  const idx = columns.findIndex(c => c.id === col.id);
+  const left = document.getElementById('column-move-left');
+  const right = document.getElementById('column-move-right');
+  left.disabled = idx <= 0;
+  right.disabled = idx < 0 || idx >= columns.length - 1;
+  const close = () => { if (menu.open) menu.close(); };
+  left.onclick = () => { close(); moveColumn(col.id, idx - 1); };
+  right.onclick = () => { close(); moveColumn(col.id, idx + 1); };
+  document.getElementById('column-rename').onclick = () => { close(); startColumnRename(headerEl, col); };
+  document.getElementById('column-delete').onclick = () => { close(); deleteColumnFlow(col, headerEl); };
   document.getElementById('column-menu-cancel').onclick = close;
-  menu.onclose = close;
   menu.showModal();
+}
+
+async function moveColumn(id, newIndex) {
+  try {
+    await apiMoveColumn(id, newIndex);
+    reload();
+  } catch (err) {
+    console.error(err);
+    alert('Move failed: ' + err.message);
+  }
+}
+
+async function deleteColumnFlow(col, headerEl) {
+  const n = headerEl.closest('.column').querySelectorAll('.card').length;
+  const msg = n > 0
+    ? 'Delete column "' + col.label + '" and its ' + n + ' card' + (n === 1 ? '' : 's') + '? This cannot be undone.'
+    : 'Delete column "' + col.label + '"?';
+  if (!await confirmBox(msg)) return;
+  try {
+    await apiDeleteColumn(col.id);
+    reload();
+  } catch (err) {
+    console.error(err);
+    alert('Delete failed: ' + err.message);
+  }
 }
 
 // Styled confirmation box. Resolves true if the user confirms, false otherwise.

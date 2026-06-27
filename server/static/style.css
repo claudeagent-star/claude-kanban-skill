@@ -96,6 +96,8 @@ body {
   transition: background-color .12s, border-color .12s, color .12s;
 }
 .btn:hover { background: var(--bg-hover); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--bg-elev); }
 .btn.primary {
   background: var(--accent);
   color: var(--accent-on);

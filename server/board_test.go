@@ -432,3 +432,37 @@ func TestLegacyLabelMapMigratesToColumns(t *testing.T) {
 		t.Errorf("legacy override not folded in: got %q", cols[0].Label)
 	}
 }
+
+func TestMoveColumn(t *testing.T) {
+	b := freshBoard(t)
+	ids := func() []string {
+		var s []string
+		for _, c := range b.Columns() {
+			s = append(s, c.ID)
+		}
+		return s
+	}
+	// defaults: to-do, blocked, in-progress, in-review, done
+	if err := b.MoveColumn("to-do", 2); err != nil {
+		t.Fatalf("MoveColumn right: %v", err)
+	}
+	if got := ids(); got[2] != "to-do" {
+		t.Errorf("after move right, want to-do at index 2, got %v", got)
+	}
+	if err := b.MoveColumn("done", 0); err != nil {
+		t.Fatalf("MoveColumn to front: %v", err)
+	}
+	if got := ids(); got[0] != "done" {
+		t.Errorf("after move to front, want done at 0, got %v", got)
+	}
+	// Clamp: moving past the end lands at the end, no error.
+	if err := b.MoveColumn("done", 99); err != nil {
+		t.Fatalf("MoveColumn clamp: %v", err)
+	}
+	if got := ids(); got[len(got)-1] != "done" {
+		t.Errorf("after clamp, want done last, got %v", got)
+	}
+	if err := b.MoveColumn("nope", 0); err != ErrColumnNotFound {
+		t.Errorf("expected ErrColumnNotFound, got %v", err)
+	}
+}

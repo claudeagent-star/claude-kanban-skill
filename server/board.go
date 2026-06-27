@@ -221,6 +221,51 @@ func (b *Board) RenameColumn(id, label string) error {
 	return ErrColumnNotFound
 }
 
+// MoveColumn re-positions a column to newIndex (clamped to the valid range),
+// shifting the others. Unknown ids return ErrColumnNotFound.
+func (b *Board) MoveColumn(id string, newIndex int) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cur := -1
+	for i := range b.columns {
+		if b.columns[i].ID == id {
+			cur = i
+			break
+		}
+	}
+	if cur < 0 {
+		return ErrColumnNotFound
+	}
+	n := len(b.columns)
+	if newIndex < 0 {
+		newIndex = 0
+	}
+	if newIndex > n-1 {
+		newIndex = n - 1
+	}
+	if newIndex == cur {
+		return nil
+	}
+	col := b.columns[cur]
+	rest := make([]Column, 0, n-1)
+	for i, c := range b.columns {
+		if i != cur {
+			rest = append(rest, c)
+		}
+	}
+	out := make([]Column, 0, n)
+	out = append(out, rest[:newIndex]...)
+	out = append(out, col)
+	out = append(out, rest[newIndex:]...)
+	prev := b.columns
+	b.columns = out
+	if err := b.saveColumns(); err != nil {
+		b.columns = prev
+		return err
+	}
+	return nil
+}
+
 // DeleteColumn removes a column and every card in it (a cascade). Unknown ids
 // return ErrColumnNotFound. Both files are persisted; the cards write happens
 // first so a column never outlives its cards on disk.

@@ -63,7 +63,7 @@ func NewMux(b *Board) http.Handler {
 		}
 		switch r.Method {
 		case http.MethodPatch:
-			handleRenameColumn(w, r, b, id)
+			handlePatchColumn(w, r, b, id)
 		case http.MethodDelete:
 			handleDeleteColumn(w, r, b, id)
 		default:
@@ -111,19 +111,49 @@ func handleAddColumn(w http.ResponseWriter, r *http.Request, b *Board) {
 	writeJSON(w, http.StatusCreated, c)
 }
 
-func handleRenameColumn(w http.ResponseWriter, r *http.Request, b *Board, id string) {
-	label, ok := decodeColumnLabel(w, r)
-	if !ok {
+// handlePatchColumn applies a sparse column update: {label} renames,
+// {position} moves. Either or both may be present.
+func handlePatchColumn(w http.ResponseWriter, r *http.Request, b *Board, id string) {
+	var req struct {
+		Label    *string `json:"label"`
+		Position *int    `json:"position"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
 		return
 	}
-	if err := b.RenameColumn(id, label); errors.Is(err, ErrColumnNotFound) {
-		http.NotFound(w, r)
-		return
-	} else if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if req.Label == nil && req.Position == nil {
+		http.Error(w, "label or position is required", http.StatusBadRequest)
 		return
 	}
-	writeJSON(w, http.StatusOK, Column{ID: id, Label: label})
+	if req.Label != nil {
+		label := strings.TrimSpace(*req.Label)
+		if label == "" {
+			http.Error(w, "label is required", http.StatusBadRequest)
+			return
+		}
+		if len(label) > columnLabelMaxLen {
+			http.Error(w, "label too long", http.StatusBadRequest)
+			return
+		}
+		if err := b.RenameColumn(id, label); errors.Is(err, ErrColumnNotFound) {
+			http.NotFound(w, r)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if req.Position != nil {
+		if err := b.MoveColumn(id, *req.Position); errors.Is(err, ErrColumnNotFound) {
+			http.NotFound(w, r)
+			return
+		} else if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, b.Columns())
 }
 
 func handleDeleteColumn(w http.ResponseWriter, r *http.Request, b *Board, id string) {
