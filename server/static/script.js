@@ -189,13 +189,22 @@ async function commitDrag(e) {
   const ds = dragState;
   dragState = null;
   const body = columnBodyAt(e.clientX, e.clientY);
+  // Compute the drop index while the card still carries .dragging, so
+  // dropIndexAt excludes it. The server's moveTo expects a position counted
+  // from the column WITHOUT the moved card; computing after removing the class
+  // double-counts it and drops the card one slot too low on a downward move.
+  // This also matches the slot the drop indicator showed during the drag.
+  let columnId = null;
+  let index = 0;
+  if (body) {
+    columnId = body.closest('.column').dataset.id;
+    index = dropIndexAt(body, e.clientY);
+  }
   ds.ghost.remove();
   ds.card.classList.remove('dragging');
   clearDragOverHighlight();
   clearDropIndicator();
   if (!body) return;
-  const columnId = body.closest('.column').dataset.id;
-  const index = dropIndexAt(body, e.clientY);
   try {
     await apiUpdate(ds.cardId, { column: columnId, position: index });
     reload();
