@@ -24,6 +24,18 @@ const addBtn    = document.getElementById('add-card');
 
 let editingId = null; // null while creating, card.id while editing
 
+// Column-label overrides (id -> custom label), loaded from the server. The
+// COLUMNS array above is the source of column ids + order + default labels;
+// anything here replaces the default label for that column.
+let columnLabels = {};
+function columnLabel(col) {
+  return columnLabels[col.id] || col.label;
+}
+function defaultLabel(colId) {
+  const c = COLUMNS.find(x => x.id === colId);
+  return c ? c.label : colId;
+}
+
 // ===== API =====
 
 async function apiList() {
@@ -52,6 +64,20 @@ async function apiUpdate(id, patch) {
 async function apiDelete(id) {
   const res = await fetch('api/cards/' + encodeURIComponent(id), { method: 'DELETE' });
   if (!res.ok) throw new Error('delete failed: ' + res.status);
+}
+async function apiColumns() {
+  const res = await fetch('api/columns');
+  if (!res.ok) throw new Error('columns failed');
+  return res.json();
+}
+async function apiSetColumn(id, label) {
+  const res = await fetch('api/columns/' + encodeURIComponent(id), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label }),
+  });
+  if (!res.ok) throw new Error('rename failed: ' + res.status);
+  return res.json();
 }
 
 // ===== Drag-and-drop helpers =====
@@ -348,11 +374,15 @@ function renderColumn(col, cards) {
   colEl.dataset.id = col.id;
   colEl.innerHTML = `
     <header class="column-header">
-      <span>${col.label}</span>
+      <span class="column-title"></span>
       <span class="count">${cards.length}</span>
     </header>
     <div class="column-body"></div>
   `;
+  const header = colEl.querySelector('.column-header');
+  // Label via textContent (never innerHTML) so a custom name can't inject markup.
+  header.querySelector('.column-title').textContent = columnLabel(col);
+  attachColumnRename(header, col.id);
   const body = colEl.querySelector('.column-body');
   // Drop targets are detected dynamically via elementFromPoint during
   // pointermove (see the global drag handlers above), so the body itself
@@ -362,6 +392,73 @@ function renderColumn(col, cards) {
     body.appendChild(renderCard(card));
   }
   return colEl;
+}
+
+// Long-press (touch or mouse-hold) or double-click a column header to rename it.
+// The listeners live on the persistent header element; the title span is looked
+// up at edit time so they survive re-renders and edit/cancel cycles.
+function attachColumnRename(headerEl, colId) {
+  let timer = null, sx = 0, sy = 0;
+  const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  const editing = () => headerEl.querySelector('input.column-rename');
+  headerEl.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || editing()) return;
+    sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => {
+      timer = null;
+      startColumnRename(headerEl, colId);
+    }, LONG_PRESS_MS);
+  });
+  headerEl.addEventListener('pointermove', e => {
+    if (!timer) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (dx * dx + dy * dy > TOUCH_SLOP_PX * TOUCH_SLOP_PX) clear();
+  });
+  headerEl.addEventListener('pointerup', clear);
+  headerEl.addEventListener('pointercancel', clear);
+  headerEl.addEventListener('pointerleave', clear);
+  headerEl.addEventListener('dblclick', () => {
+    if (!editing()) startColumnRename(headerEl, colId);
+  });
+}
+
+function startColumnRename(headerEl, colId) {
+  const titleSpan = headerEl.querySelector('.column-title');
+  if (!titleSpan) return;
+  const current = columnLabels[colId] || defaultLabel(colId);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'column-rename';
+  input.maxLength = 60;
+  input.value = current;
+  titleSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async commit => {
+    if (done) return;
+    done = true;
+    const label = input.value.trim();
+    if (commit && label && label !== current) {
+      try {
+        await apiSetColumn(colId, label);
+        columnLabels[colId] = label;
+      } catch (err) {
+        console.error(err);
+        alert('Rename failed: ' + err.message);
+      }
+    }
+    const span = document.createElement('span');
+    span.className = 'column-title';
+    span.textContent = columnLabels[colId] || defaultLabel(colId);
+    input.replaceWith(span);
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
 }
 
 function renderCard(card) {
@@ -521,7 +618,9 @@ syncThemeButton();
 
 async function reload() {
   try {
-    render(await apiList());
+    const [cards, cols] = await Promise.all([apiList(), apiColumns()]);
+    columnLabels = cols || {};
+    render(cards);
   } catch (err) {
     console.error(err);
     boardEl.innerHTML = '<p style="padding:1rem;color:#b54848">Failed to load: ' + err.message + '</p>';

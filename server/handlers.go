@@ -44,7 +44,55 @@ func NewMux(b *Board) http.Handler {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
+	mux.HandleFunc("/api/columns", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeJSON(w, http.StatusOK, b.ColumnLabels())
+	})
+	mux.HandleFunc("/api/columns/", func(w http.ResponseWriter, r *http.Request) {
+		id := strings.TrimPrefix(r.URL.Path, "/api/columns/")
+		if id == "" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPatch {
+			w.Header().Set("Allow", "PATCH")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		handleSetColumn(w, r, b, id)
+	})
 	return mux
+}
+
+// columnLabelMaxLen caps a custom column label so the header stays sane.
+const columnLabelMaxLen = 60
+
+func handleSetColumn(w http.ResponseWriter, r *http.Request, b *Board, id string) {
+	var req struct {
+		Label string `json:"label"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		http.Error(w, "invalid JSON", http.StatusBadRequest)
+		return
+	}
+	label := strings.TrimSpace(req.Label)
+	if label == "" {
+		http.Error(w, "label is required", http.StatusBadRequest)
+		return
+	}
+	if len(label) > columnLabelMaxLen {
+		http.Error(w, "label too long", http.StatusBadRequest)
+		return
+	}
+	if err := b.SetColumnLabel(id, label); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "label": label})
 }
 
 type createRequest struct {

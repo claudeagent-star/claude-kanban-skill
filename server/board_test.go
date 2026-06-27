@@ -339,3 +339,45 @@ func TestColorRoundTripsThroughAddAndUpdate(t *testing.T) {
 		}
 	}
 }
+
+func TestColumnLabelDefaultsEmpty(t *testing.T) {
+	b := freshBoard(t)
+	if got := len(b.ColumnLabels()); got != 0 {
+		t.Fatalf("expected no overrides, got %d", got)
+	}
+}
+
+func TestSetColumnLabelPersistsAcrossReload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	b, err := NewBoard(path)
+	if err != nil {
+		t.Fatalf("NewBoard: %v", err)
+	}
+	if err := b.SetColumnLabel("to-do", "Backlog"); err != nil {
+		t.Fatalf("SetColumnLabel: %v", err)
+	}
+	// Column overrides live in a sibling file, not the cards state file.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "columns.json")); err != nil {
+		t.Fatalf("columns.json not written: %v", err)
+	}
+	b2, err := NewBoard(path)
+	if err != nil {
+		t.Fatalf("reload NewBoard: %v", err)
+	}
+	if got := b2.ColumnLabels()["to-do"]; got != "Backlog" {
+		t.Errorf("label not persisted: got %q, want %q", got, "Backlog")
+	}
+}
+
+func TestSetColumnLabelEmptyClearsOverride(t *testing.T) {
+	b := freshBoard(t)
+	if err := b.SetColumnLabel("done", "Shipped"); err != nil {
+		t.Fatalf("SetColumnLabel: %v", err)
+	}
+	if err := b.SetColumnLabel("done", ""); err != nil {
+		t.Fatalf("clear SetColumnLabel: %v", err)
+	}
+	if _, ok := b.ColumnLabels()["done"]; ok {
+		t.Errorf("expected override cleared, still present")
+	}
+}

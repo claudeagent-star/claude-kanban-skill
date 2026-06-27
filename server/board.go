@@ -28,17 +28,26 @@ type Card struct {
 // Board owns the in-memory state and the JSON state file.
 // Mutations write through to disk atomically.
 type Board struct {
-	path string
+	path    string
+	colPath string // sibling file holding column-label overrides
 
-	mu    sync.Mutex
-	cards []Card
+	mu        sync.Mutex
+	cards     []Card
+	colLabels map[string]string // column id -> custom label
 }
 
 // NewBoard loads (or creates) the board state at path.
 // A missing file is treated as an empty board.
 func NewBoard(path string) (*Board, error) {
-	b := &Board{path: path}
+	b := &Board{
+		path:      path,
+		colPath:   filepath.Join(filepath.Dir(path), "columns.json"),
+		colLabels: map[string]string{},
+	}
 	if err := b.load(); err != nil {
+		return nil, err
+	}
+	if err := b.loadColumns(); err != nil {
 		return nil, err
 	}
 	return b, nil
@@ -102,6 +111,82 @@ func (b *Board) save() error {
 	}
 	if err := os.Rename(tmp, b.path); err != nil {
 		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// loadColumns reads the column-label overrides file. Missing = no overrides.
+func (b *Board) loadColumns() error {
+	data, err := os.ReadFile(b.colPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read columns: %w", err)
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	var labels map[string]string
+	if err := json.Unmarshal(data, &labels); err != nil {
+		return fmt.Errorf("parse columns: %w", err)
+	}
+	if labels != nil {
+		b.colLabels = labels
+	}
+	return nil
+}
+
+// saveColumns writes the column-label overrides atomically. Caller holds b.mu.
+func (b *Board) saveColumns() error {
+	if err := os.MkdirAll(filepath.Dir(b.colPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir state dir: %w", err)
+	}
+	data, err := json.MarshalIndent(b.colLabels, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode columns: %w", err)
+	}
+	tmp := b.colPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write tmp: %w", err)
+	}
+	if err := os.Rename(tmp, b.colPath); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
+// ColumnLabels returns a copy of the column-label overrides (id -> label).
+func (b *Board) ColumnLabels() map[string]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[string]string, len(b.colLabels))
+	for k, v := range b.colLabels {
+		out[k] = v
+	}
+	return out
+}
+
+// SetColumnLabel sets (or, with an empty label, clears) the override for a
+// column id and persists. The column id is client-defined; the server does not
+// validate it against a fixed set.
+func (b *Board) SetColumnLabel(id, label string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	prev, had := b.colLabels[id]
+	if label == "" {
+		delete(b.colLabels, id)
+	} else {
+		b.colLabels[id] = label
+	}
+	if err := b.saveColumns(); err != nil {
+		// Roll back so memory and disk stay consistent.
+		if had {
+			b.colLabels[id] = prev
+		} else {
+			delete(b.colLabels, id)
+		}
+		return err
 	}
 	return nil
 }

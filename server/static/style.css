@@ -151,6 +151,31 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--ink-soft);
+  /* Long-press / double-click to rename; suppress selection + iOS callout. */
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.column-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.column-rename {
+  flex: 1;
+  min-width: 0;
+  margin-right: 0.5rem;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--ink);
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
 }
 .column-header .count {
   font-size: 0.8rem;
