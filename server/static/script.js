@@ -306,6 +306,16 @@ document.addEventListener('pointercancel', abortDrag);
 // ===== Rendering =====
 
 function render(cards) {
+  // Preserve scroll position across the full re-render so moving a card
+  // doesn't jump the board (horizontal) or any column (vertical) back to the
+  // top/left. Capture before we tear the DOM down, restore after rebuilding.
+  const prevScrollLeft = boardEl.scrollLeft;
+  const prevColScroll = {};
+  boardEl.querySelectorAll('.column').forEach(c => {
+    const body = c.querySelector('.column-body');
+    if (body) prevColScroll[c.dataset.id] = body.scrollTop;
+  });
+
   boardEl.innerHTML = '';
   const byCol = Object.fromEntries(COLUMNS.map(c => [c.id, []]));
   for (const card of cards) {
@@ -314,8 +324,13 @@ function render(cards) {
   }
   for (const col of COLUMNS) {
     const colCards = (byCol[col.id] || []).sort((a, b) => a.position - b.position);
-    boardEl.appendChild(renderColumn(col, colCards));
+    const colEl = renderColumn(col, colCards);
+    boardEl.appendChild(colEl);
+    if (prevColScroll[col.id] !== undefined) {
+      colEl.querySelector('.column-body').scrollTop = prevColScroll[col.id];
+    }
   }
+  boardEl.scrollLeft = prevScrollLeft;
 }
 
 function renderColumn(col, cards) {
