@@ -76,8 +76,8 @@ async function apiDelete(id) {
 
 const DRAG_THRESHOLD_PX = 6;
 // Touch: hold this long without moving to turn a touch into a drag. Moving
-// before this elapses scrolls instead. Tunable; 2s is deliberately cautious.
-const LONG_PRESS_MS = 2000;
+// before this elapses scrolls instead. Tunable.
+const LONG_PRESS_MS = 1000;
 // Touch: movement beyond this (px) during the long-press window commits to a
 // scroll. A little slop so a resting finger's jitter doesn't cancel the press.
 const TOUCH_SLOP_PX = 8;
