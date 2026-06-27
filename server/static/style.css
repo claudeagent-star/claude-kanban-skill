@@ -98,6 +98,8 @@ body {
 .btn:hover { background: var(--bg-hover); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn:disabled:hover { background: var(--bg-elev); }
+/* Slimmer topbar action buttons. */
+#add-card, #add-column { padding-left: 0.6rem; padding-right: 0.6rem; }
 .btn.primary {
   background: var(--accent);
   color: var(--accent-on);
