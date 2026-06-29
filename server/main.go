@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -19,7 +20,19 @@ var staticFS embed.FS
 func main() {
 	listen := flag.String("listen", "127.0.0.1:8765", "address to listen on (host:port)")
 	statePath := flag.String("state", defaultStatePath(), "path to the JSON state file")
+	agentsFlag := flag.String("agents", "", "comma-separated agent names for @-mention suggestions")
+	attachmentsDir := flag.String("attachments", "", "directory to store uploaded files (default: <state-dir>/attachments)")
 	flag.Parse()
+
+	var agents []string
+	if *agentsFlag != "" {
+		for _, a := range strings.Split(*agentsFlag, ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				agents = append(agents, a)
+			}
+		}
+	}
+	_ = attachmentsDir // reserved for future use
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
@@ -29,7 +42,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	api := NewMux(board)
+	api := NewMux(board, agents)
 
 	// Serve the embedded static frontend at /.
 	static, err := fs.Sub(staticFS, "static")

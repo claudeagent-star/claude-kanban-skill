@@ -22,7 +22,21 @@ type Card struct {
 	// Color is an optional palette tag rendered by the frontend as a
 	// left-border + tinted background. Empty string = no colour.
 	// Allowed values are validated by the API layer (see handlers.go).
-	Color string `json:"color,omitempty"`
+	Color     string `json:"color,omitempty"`
+	ProjectID string `json:"projectId,omitempty"`
+}
+
+// Project groups cards under a named label.
+type Project struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// state is the on-disk format. Cards used to be stored as a bare []Card;
+// that format is still accepted on load for backward compatibility.
+type state struct {
+	Cards    []Card    `json:"cards"`
+	Projects []Project `json:"projects"`
 }
 
 // Board owns the in-memory state and the JSON state file.
@@ -30,8 +44,9 @@ type Card struct {
 type Board struct {
 	path string
 
-	mu    sync.Mutex
-	cards []Card
+	mu       sync.Mutex
+	cards    []Card
+	projects []Project
 }
 
 // NewBoard loads (or creates) the board state at path.
@@ -44,7 +59,8 @@ func NewBoard(path string) (*Board, error) {
 	return b, nil
 }
 
-// load reads the state file into b.cards. Missing file = empty.
+// load reads the state file into b.cards / b.projects. Missing file = empty.
+// Accepts both the legacy bare-array format ([]Card) and the current object format.
 func (b *Board) load() error {
 	data, err := os.ReadFile(b.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -56,11 +72,29 @@ func (b *Board) load() error {
 	if len(data) == 0 {
 		return nil
 	}
-	var cards []Card
-	if err := json.Unmarshal(data, &cards); err != nil {
-		return fmt.Errorf("parse state: %w", err)
+	// Detect format by first non-whitespace byte.
+	trimmed := []byte{}
+	for _, c := range data {
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			trimmed = []byte{c}
+			break
+		}
 	}
-	b.cards = cards
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		// Legacy: bare array of cards.
+		var cards []Card
+		if err := json.Unmarshal(data, &cards); err != nil {
+			return fmt.Errorf("parse state (legacy): %w", err)
+		}
+		b.cards = cards
+	} else {
+		var s state
+		if err := json.Unmarshal(data, &s); err != nil {
+			return fmt.Errorf("parse state: %w", err)
+		}
+		b.cards = s.Cards
+		b.projects = s.Projects
+	}
 	// Legacy state files may have all-zero positions. Renumber each column
 	// 0..N-1 in load order so drag-and-drop has a stable basis.
 	b.renumberAllColumns()
@@ -92,7 +126,14 @@ func (b *Board) save() error {
 	if err := os.MkdirAll(filepath.Dir(b.path), 0o755); err != nil {
 		return fmt.Errorf("mkdir state dir: %w", err)
 	}
-	data, err := json.MarshalIndent(b.cards, "", "  ")
+	s := state{Cards: b.cards, Projects: b.projects}
+	if s.Cards == nil {
+		s.Cards = []Card{}
+	}
+	if s.Projects == nil {
+		s.Projects = []Project{}
+	}
+	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode state: %w", err)
 	}
@@ -117,7 +158,7 @@ func (b *Board) ListCards() []Card {
 
 // AddCard creates a card on the board and persists. The new card is appended
 // to the end of its column (Position = current count in that column).
-func (b *Board) AddCard(title, description, column, color string) (Card, error) {
+func (b *Board) AddCard(title, description, column, color, projectID string) (Card, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	pos := 0
@@ -133,6 +174,7 @@ func (b *Board) AddCard(title, description, column, color string) (Card, error) 
 		Column:      column,
 		Position:    pos,
 		Color:       color,
+		ProjectID:   projectID,
 	}
 	b.cards = append(b.cards, c)
 	if err := b.save(); err != nil {
@@ -151,6 +193,7 @@ type CardUpdate struct {
 	Column      *string `json:"column,omitempty"`
 	Position    *int    `json:"position,omitempty"`
 	Color       *string `json:"color,omitempty"`
+	ProjectID   *string `json:"projectId,omitempty"`
 }
 
 // ErrCardNotFound is returned when a card ID doesn't exist on the board.
@@ -180,6 +223,9 @@ func (b *Board) UpdateCard(id string, u CardUpdate) (Card, error) {
 	}
 	if u.Color != nil {
 		b.cards[idx].Color = *u.Color
+	}
+	if u.ProjectID != nil {
+		b.cards[idx].ProjectID = *u.ProjectID
 	}
 	if u.Column != nil || u.Position != nil {
 		targetColumn := b.cards[idx].Column
@@ -278,6 +324,55 @@ func (b *Board) DeleteCard(id string) error {
 		return b.save()
 	}
 	return ErrCardNotFound
+}
+
+// ListProjects returns a copy of all projects.
+func (b *Board) ListProjects() []Project {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]Project, len(b.projects))
+	copy(out, b.projects)
+	return out
+}
+
+// AddProject creates a project and persists.
+func (b *Board) AddProject(name string) (Project, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	p := Project{ID: newID(), Name: name}
+	b.projects = append(b.projects, p)
+	if err := b.save(); err != nil {
+		b.projects = b.projects[:len(b.projects)-1]
+		return Project{}, err
+	}
+	return p, nil
+}
+
+// ErrProjectNotFound is returned when a project ID doesn't exist.
+var ErrProjectNotFound = errors.New("project not found")
+
+// DeleteProject removes a project by ID. Cards that reference it have their
+// ProjectID cleared. Returns ErrProjectNotFound for unknown IDs.
+func (b *Board) DeleteProject(id string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	found := false
+	for i := range b.projects {
+		if b.projects[i].ID == id {
+			b.projects = append(b.projects[:i], b.projects[i+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ErrProjectNotFound
+	}
+	for i := range b.cards {
+		if b.cards[i].ProjectID == id {
+			b.cards[i].ProjectID = ""
+		}
+	}
+	return b.save()
 }
 
 // newID returns an unguessable 16-hex-char ID.

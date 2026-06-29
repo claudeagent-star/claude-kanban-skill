@@ -18,11 +18,14 @@ const titleEl   = document.getElementById('card-title');
 const descEl    = document.getElementById('card-description');
 const colEl     = document.getElementById('card-column');
 const colorEl   = document.getElementById('card-color');
+const projectEl = document.getElementById('card-project');
 const delBtn    = document.getElementById('card-delete');
 const cancelBtn = document.getElementById('card-cancel');
 const addBtn    = document.getElementById('add-card');
 
 let editingId = null; // null while creating, card.id while editing
+let projects = [];    // cached project list
+let agents = [];      // agent names for @-mention
 
 // ===== API =====
 
@@ -53,6 +56,68 @@ async function apiDelete(id) {
   const res = await fetch('api/cards/' + encodeURIComponent(id), { method: 'DELETE' });
   if (!res.ok) throw new Error('delete failed: ' + res.status);
 }
+
+async function apiListProjects() {
+  const res = await fetch('api/projects');
+  if (!res.ok) throw new Error('projects list failed');
+  return res.json();
+}
+async function apiCreateProject(name) {
+  const res = await fetch('api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error('create project failed: ' + res.status);
+  return res.json();
+}
+async function apiDeleteProject(id) {
+  const res = await fetch('api/projects/' + encodeURIComponent(id), { method: 'DELETE' });
+  if (!res.ok) throw new Error('delete project failed: ' + res.status);
+}
+async function apiConfig() {
+  try {
+    const res = await fetch('api/config');
+    if (!res.ok) return { agents: [] };
+    return res.json();
+  } catch { return { agents: [] }; }
+}
+
+// ===== Project dropdown =====
+
+function populateProjectDropdown(selectedId) {
+  // Keep the "— none —" option, re-add projects, then "＋ New project…"
+  projectEl.innerHTML = '<option value="">— none —</option>';
+  for (const p of projects) {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.name;
+    projectEl.appendChild(opt);
+  }
+  const addOpt = document.createElement('option');
+  addOpt.value = '__new__';
+  addOpt.textContent = '＋ New project…';
+  projectEl.appendChild(addOpt);
+  projectEl.value = selectedId || '';
+}
+
+projectEl.addEventListener('change', async () => {
+  if (projectEl.value !== '__new__') return;
+  const name = prompt('Project name:');
+  if (!name || !name.trim()) {
+    projectEl.value = '';
+    return;
+  }
+  try {
+    const p = await apiCreateProject(name.trim());
+    projects.push(p);
+    populateProjectDropdown(p.id);
+  } catch (err) {
+    console.error(err);
+    alert('Could not create project: ' + err.message);
+    projectEl.value = '';
+  }
+});
 
 // ===== Drag-and-drop helpers =====
 //
@@ -224,6 +289,12 @@ document.addEventListener('pointercancel', abortDrag);
 
 // ===== Rendering =====
 
+function projectName(id) {
+  if (!id) return null;
+  const p = projects.find(p => p.id === id);
+  return p ? p.name : null;
+}
+
 function render(cards) {
   boardEl.innerHTML = '';
   const byCol = Object.fromEntries(COLUMNS.map(c => [c.id, []]));
@@ -267,6 +338,14 @@ function renderCard(card) {
     el.dataset.color = card.color;
   }
 
+  const pName = projectName(card.projectId);
+  if (pName) {
+    const tag = document.createElement('div');
+    tag.className = 'card-project-tag';
+    tag.textContent = pName;
+    el.appendChild(tag);
+  }
+
   const title = document.createElement('div');
   title.className = 'title';
   title.textContent = card.title;
@@ -308,6 +387,7 @@ function renderCard(card) {
 // ===== Modal =====
 
 function openModal(card) {
+  populateProjectDropdown(card ? card.projectId : '');
   if (card) {
     editingId = card.id;
     titleEl.value = card.title;
@@ -336,6 +416,7 @@ form.addEventListener('submit', async e => {
     description: descEl.value,
     column: colEl.value,
     color: colorEl.value,
+    projectId: projectEl.value === '__new__' ? '' : projectEl.value,
   };
   if (!payload.title) return;
   try {
@@ -367,6 +448,94 @@ delBtn.addEventListener('click', async () => {
 
 addBtn.addEventListener('click', () => openModal(null));
 
+// ===== @-mention autocomplete =====
+
+let mentionPopup = null;
+let mentionStart = -1;
+
+function closeMentionPopup() {
+  if (mentionPopup) {
+    mentionPopup.remove();
+    mentionPopup = null;
+  }
+  mentionStart = -1;
+}
+
+function showMentionPopup(matches, cursorPos) {
+  closeMentionPopup();
+  if (!matches.length) return;
+
+  mentionPopup = document.createElement('ul');
+  mentionPopup.className = 'mention-popup';
+
+  for (const name of matches) {
+    const li = document.createElement('li');
+    li.textContent = '@' + name;
+    li.addEventListener('mousedown', e => {
+      e.preventDefault();
+      insertMention(name);
+    });
+    mentionPopup.appendChild(li);
+  }
+
+  // Position below the textarea
+  const rect = descEl.getBoundingClientRect();
+  mentionPopup.style.left = rect.left + 'px';
+  mentionPopup.style.top  = (rect.bottom + window.scrollY + 2) + 'px';
+  mentionPopup.style.width = rect.width + 'px';
+  document.body.appendChild(mentionPopup);
+}
+
+function insertMention(name) {
+  const before = descEl.value.slice(0, mentionStart);
+  const after  = descEl.value.slice(descEl.selectionStart);
+  descEl.value = before + '@' + name + ' ' + after;
+  const pos = mentionStart + name.length + 2;
+  descEl.setSelectionRange(pos, pos);
+  closeMentionPopup();
+}
+
+descEl.addEventListener('input', () => {
+  if (!agents.length) { closeMentionPopup(); return; }
+  const pos = descEl.selectionStart;
+  const text = descEl.value.slice(0, pos);
+  const atIdx = text.lastIndexOf('@');
+  if (atIdx < 0) { closeMentionPopup(); return; }
+  const fragment = text.slice(atIdx + 1);
+  // Only trigger if no space in fragment (i.e., still mid-word)
+  if (/\s/.test(fragment)) { closeMentionPopup(); return; }
+  mentionStart = atIdx;
+  const q = fragment.toLowerCase();
+  const matches = agents.filter(a => a.toLowerCase().startsWith(q));
+  showMentionPopup(matches, pos);
+});
+
+descEl.addEventListener('keydown', e => {
+  if (!mentionPopup) return;
+  const items = [...mentionPopup.querySelectorAll('li')];
+  const active = mentionPopup.querySelector('li.active');
+  if (e.key === 'Escape') { closeMentionPopup(); e.stopPropagation(); }
+  else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const next = active ? active.nextElementSibling : items[0];
+    if (next) { if (active) active.classList.remove('active'); next.classList.add('active'); }
+  }
+  else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const prev = active ? active.previousElementSibling : items[items.length - 1];
+    if (prev) { if (active) active.classList.remove('active'); prev.classList.add('active'); }
+  }
+  else if ((e.key === 'Enter' || e.key === 'Tab') && active) {
+    e.preventDefault();
+    insertMention(active.textContent.slice(1));
+  }
+});
+
+descEl.addEventListener('blur', () => {
+  // Delay so mousedown on popup fires first.
+  setTimeout(closeMentionPopup, 120);
+});
+
 // ===== Theme toggle =====
 //
 // The initial theme is applied in index.html before first paint, reading
@@ -396,7 +565,10 @@ syncThemeButton();
 
 async function reload() {
   try {
-    render(await apiList());
+    const [cards, projs, cfg] = await Promise.all([apiList(), apiListProjects(), apiConfig()]);
+    projects = projs || [];
+    agents = cfg.agents || [];
+    render(cards);
   } catch (err) {
     console.error(err);
     boardEl.innerHTML = '<p style="padding:1rem;color:#b54848">Failed to load: ' + err.message + '</p>';

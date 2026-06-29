@@ -244,6 +244,43 @@ body {
   overflow: hidden;
 }
 
+.card-project-tag {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.2rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* @-mention autocomplete popup */
+.mention-popup {
+  position: absolute;
+  z-index: 10000;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--shadow-modal);
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.mention-popup li {
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.mention-popup li:hover,
+.mention-popup li.active {
+  background: var(--bg-hover);
+}
+
 /* Modal */
 .modal {
   border: 1px solid var(--line);
